@@ -21,6 +21,7 @@ import GlareHover from './components/GlareHover.jsx'
 import AnimatedText from './components/AnimatedText.jsx'
 import AuthPage from './components/AuthPage.jsx'
 import LawAgentView from './components/LawAgentView.jsx'
+import DecisionPage from './components/DecisionPage.jsx'
 import StaggeredMenu from './components/StaggeredMenu.jsx'
 import { casePresentationService } from './services/nyayaApi.js'
 
@@ -531,6 +532,30 @@ function App() {
             </button>
             <ErrorBoundary>
               <LawAgentView responseData={lastResponse} />
+            </ErrorBoundary>
+          </div>
+        )
+      case 'decision':
+        return (
+          <div>
+            <button
+              onClick={handleBackToDashboard}
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 20px',
+                color: '#fff',
+                cursor: 'pointer',
+                marginBottom: '20px',
+                fontSize: '14px',
+                marginLeft: '20px'
+              }}
+            >
+              ← Back to Dashboard
+            </button>
+            <ErrorBoundary>
+              <DecisionPage />
             </ErrorBoundary>
           </div>
         )
