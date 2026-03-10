@@ -39,9 +39,9 @@ export async function queryNyayaDecision(query, jurisdiction = 'IN') {
       throw new Error('Query cannot be empty')
     }
 
-    const response = await nyayaClient.post('/query', {
+    const response = await nyayaClient.post('/nyaya/query', {
       query: query.trim(),
-      jurisdiction: jurisdiction
+      jurisdiction_hint: jurisdiction
     })
 
     // Validate response has enforcement_decision

@@ -44,7 +44,7 @@ const sampleCaseSummary = {
   parties: {
     plaintiff: "TechSolutions Pvt Ltd",
     defendant: "DevCorp India"
-  }
+  }   
 };
 
 const sampleLegalRoutes = {
@@ -220,8 +220,9 @@ const sampleJurisdictionInfo = {
   emergencyGuidance: "File FIR at nearest Police Station, contact local magistrate for immediate orders"
 };
 
-// Case Presentation Component - Wires components to real backend data
-const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData = false }) => {
+// Case Presentation Component - Wires components to real backend data only
+// NO MOCK DATA - All data comes from real Nyaya backend (Raj's Decision Engine)
+const CasePresentation = ({ traceId, jurisdiction, caseType, caseId }) => {
   const [caseData, setCaseData] = useState({
     caseSummary: null,
     legalRoutes: null,
@@ -235,18 +236,11 @@ const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData
   const [currentJurisdiction, setCurrentJurisdiction] = useState(jurisdiction || 'India')
   const [retryCount, setRetryCount] = useState(0)
 
-  // Fetch all case data from backend including enforcement status
+  // Fetch all case data from REAL backend only - no fallback to mock data
   const fetchCaseData = useCallback(async () => {
-    // Demo mode: Use sample data only when explicitly enabled
-    if (useDemoData || !traceId) {
-      setCaseData({
-        caseSummary: sampleCaseSummary,
-        legalRoutes: sampleLegalRoutes,
-        timeline: sampleTimeline,
-        glossary: sampleGlossary,
-        jurisdictionInfo: sampleJurisdictionInfo,
-        enforcementStatus: null
-      })
+    // Cannot fetch without traceId - show error instead of mock data
+    if (!traceId) {
+      setError('No trace ID available. Please submit a legal query first to get a decision from Nyaya backend.')
       setLoading(false)
       return
     }
@@ -255,17 +249,17 @@ const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData
     setError(null)
 
     try {
-      // Fetch case data and enforcement status in parallel
+      // Fetch case data and enforcement status in parallel from REAL backend
       const [caseResult, enforcementResult] = await Promise.all([
         casePresentationService.getAllCaseData(traceId, currentJurisdiction, caseType, caseId),
         casePresentationService.getEnforcementStatus(traceId, currentJurisdiction)
       ])
 
-      // Get enforcement status data
+      // Get enforcement status data from Chandresh's Sovereign Enforcement Engine
       const enforcementStatus = enforcementResult.success ? enforcementResult.data : null
 
       if (caseResult.success) {
-        // Use real backend data - no fallback to sample data
+        // Use real backend data only - no fallback
         setCaseData({
           caseSummary: caseResult.data.caseSummary,
           legalRoutes: caseResult.data.legalRoutes,
@@ -275,8 +269,8 @@ const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData
           enforcementStatus: enforcementStatus
         })
       } else {
-        // Real error - no fallback to sample data
-        setError(caseResult.error || 'Failed to load case data from backend')
+        // Real error from backend - no fallback to sample data
+        setError(caseResult.error || 'Failed to load case data from Nyaya backend')
         setCaseData({
           caseSummary: null,
           legalRoutes: null,
@@ -287,7 +281,7 @@ const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData
         })
       }
     } catch (err) {
-      setError(err.message || 'Failed to load case data')
+      setError(err.message || 'Failed to connect to Nyaya backend')
       setCaseData({
         caseSummary: null,
         legalRoutes: null,
@@ -299,7 +293,7 @@ const CasePresentation = ({ traceId, jurisdiction, caseType, caseId, useDemoData
     } finally {
       setLoading(false)
     }
-  }, [traceId, currentJurisdiction, caseType, caseId, useDemoData, retryCount])
+  }, [traceId, currentJurisdiction, caseType, caseId, retryCount])
 
   // Fetch data on mount and when jurisdiction changes
   useEffect(() => {
