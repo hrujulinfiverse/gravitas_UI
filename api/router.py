@@ -19,6 +19,9 @@ from provenance_chain.event_signer import signer
 
 router = APIRouter(prefix="/nyaya", tags=["nyaya"])
 
+# In-memory store for enforcement-relevant trace data
+_trace_store: Dict[str, Dict[str, Any]] = {}
+
 # Initialize agents and components
 jurisdiction_router_agent = JurisdictionRouterAgent()
 jurisdiction_router = JurisdictionRouter()
@@ -93,6 +96,13 @@ async def query_legal(
             confidence,
             legal_route
         )
+
+        # Store trace data for enforcement status lookup
+        _trace_store[trace_id] = {
+            "confidence": confidence,
+            "jurisdiction": target_jurisdiction,
+            "domain": domain
+        }
 
         return ResponseBuilder.build_nyaya_response(
             domain=domain,
@@ -457,22 +467,30 @@ async def get_enforcement_status(
     jurisdiction: str = Query(..., description="Selected jurisdiction")
 ):
     """Fetch enforcement status for the legal pathway."""
-    try:
-        # Determine enforcement state based on jurisdiction and query context
-        # For demo purposes, return clear state
-        # In production, this would be determined by the agent's analysis
-        return ResponseBuilder.build_enforcement_status(
-            trace_id=trace_id,
-            state="clear",
-            reason="",
-            safe_explanation="This legal pathway is available for your case. You may proceed with confidence."
-        )
-    except Exception as e:
+    trace_data = _trace_store.get(trace_id)
+    if not trace_data:
         raise HTTPException(
             status_code=404,
             detail=ResponseBuilder.build_error_response(
                 "ENFORCEMENT_STATUS_NOT_FOUND",
-                f"Enforcement status not found for trace {trace_id}",
+                f"Trace {trace_id} not found",
                 trace_id
             ).dict()
         )
+
+    confidence = trace_data.get("confidence", 0.5)
+
+    if confidence < 0.4:
+        state, reason = "block", "Confidence too low to proceed with this legal pathway."
+    elif confidence < 0.65:
+        state, reason = "escalate", "Moderate confidence — escalation to senior counsel recommended."
+    elif confidence < 0.8:
+        state, reason = "conditional", "Proceed with caution; verify jurisdiction-specific requirements."
+    else:
+        state, reason = "clear", ""
+
+    return ResponseBuilder.build_enforcement_status(
+        trace_id=trace_id,
+        state=state,
+        reason=reason
+    )
