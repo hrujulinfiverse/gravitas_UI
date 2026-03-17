@@ -22,6 +22,7 @@ import AnimatedText from './components/AnimatedText.jsx'
 import AuthPage from './components/AuthPage.jsx'
 import LawAgentView from './components/LawAgentView.jsx'
 import DecisionPage from './components/DecisionPage.jsx'
+import LegalDecisionDocument from './components/LegalDecisionDocument.jsx'
 import StaggeredMenu from './components/StaggeredMenu.jsx'
 import { casePresentationService } from './services/nyayaApi.js'
 
@@ -365,6 +366,30 @@ function App() {
             </ErrorBoundary>
           </div>
         )
+      case 'decision-draft':
+        return (
+          <div>
+            <button
+              onClick={handleBackToDashboard}
+              style={{
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                borderRadius: '8px',
+                padding: '10px 20px',
+                color: '#fff',
+                cursor: 'pointer',
+                marginBottom: '20px',
+                fontSize: '14px',
+                marginLeft: '20px'
+              }}
+            >
+              ← Back to Dashboard
+            </button>
+            <ErrorBoundary>
+              <LegalDecisionDocument onResponseReceived={setLastResponse} />
+            </ErrorBoundary>
+          </div>
+        )
       case 'procedure':
         return (
           <ErrorBoundary>
@@ -548,6 +573,7 @@ function App() {
         ref={menuRef}
         items={[
           { label: 'Chat Mode', value: 'consult' },
+          { label: 'Decision Draft', value: 'decision-draft' },
           { label: 'Law Agent', value: 'law-agent' },
           { label: 'Explore', value: 'docs' },
           { label: user.name, value: 'profile' },

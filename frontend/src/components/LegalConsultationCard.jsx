@@ -46,14 +46,14 @@ const LegalConsultationCard = () => {
             color: '#28a745',
             marginBottom: '15px'
           }}>
-            Consultation Request Acknowledged
+            Consultation Request Recorded
           </h2>
           <p style={{
             color: '#6c757d',
             marginBottom: '20px',
             lineHeight: '1.6'
           }}>
-            Thank you for your inquiry. Based on the details you've shared, I'll examine your legal position and contact you within 24 hours to arrange a comprehensive consultation.
+            Your consultation request has been logged. A legal representative will review your case details and contact you within 24 hours to coordinate the consultation.
           </p>
           <div style={{
             backgroundColor: '#f8f9fa',
@@ -90,7 +90,7 @@ const LegalConsultationCard = () => {
         marginBottom: '25px',
         fontSize: '14px'
       }}>
-        When dealing with intricate legal issues, a tailored consultation allows me to address your unique circumstances and jurisdictional requirements directly.
+        Comprehensive legal consultation for complex matters requiring jurisdiction-specific analysis and personalized legal strategy.
       </p>
 
       <form onSubmit={handleSubmit}>

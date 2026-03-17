@@ -93,10 +93,10 @@ const LegalQueryCard = ({ onResponseReceived }) => {
         borderRadius: '16px',
         padding: '32px'
       }}>
-        <h2 style={{ color: '#fff', fontSize: '24px', marginBottom: '24px' }}>Ask Legal Question</h2>
+        <h2 style={{ color: '#fff', fontSize: '24px', marginBottom: '24px' }}>Case Intake</h2>
         
         <div style={{ marginBottom: '20px' }}>
-          <label style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginBottom: '8px', display: 'block' }}>Select Jurisdiction</label>
+          <label style={{ color: 'rgba(255, 255, 255, 0.8)', fontSize: '14px', marginBottom: '8px', display: 'block' }}>Jurisdiction</label>
           <div style={{ display: 'flex', gap: '12px' }}>
             {['India', 'UK', 'UAE'].map(jurisdiction => (
               <button
@@ -124,7 +124,7 @@ const LegalQueryCard = ({ onResponseReceived }) => {
           <textarea
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Describe your legal question..."
+            placeholder="Enter case facts, circumstances, and relief sought..."
             style={{
               width: '100%',
               minHeight: '150px',
@@ -152,7 +152,7 @@ const LegalQueryCard = ({ onResponseReceived }) => {
               cursor: isSubmitting || !query.trim() ? 'not-allowed' : 'pointer'
             }}
           >
-            {isSubmitting ? 'Analyzing...' : 'Get Legal Analysis'}
+            {isSubmitting ? 'Processing Decision...' : 'Generate Legal Decision'}
           </button>
         </form>
       </div>
@@ -173,7 +173,7 @@ const LegalQueryCard = ({ onResponseReceived }) => {
             borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
             paddingBottom: '12px'
           }}>
-            🏛️ Legal Assessment
+            📋 Legal Decision Document
           </h3>
 
           <div style={{ 
