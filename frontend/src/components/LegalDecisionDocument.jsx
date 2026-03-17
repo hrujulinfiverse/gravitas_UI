@@ -1,6 +1,205 @@
 import React, { useState, useEffect } from 'react'
 import { legalQueryService } from '../services/nyayaApi.js'
 
+const EVIDENCE_REQUIREMENTS = {
+  personal_injury: [
+    { item: 'Medical records and treatment history', required: true },
+    { item: 'Hospital bills and expense receipts', required: true },
+    { item: 'Police incident report (FIR)', required: true },
+    { item: 'Doctor\'s fitness certificate', required: false },
+    { item: 'Witness statements', required: false },
+    { item: 'Photographs of injuries', required: false },
+    { item: 'Employment records for loss of income', required: false }
+  ],
+  contract_dispute: [
+    { item: 'Signed contract agreement', required: true },
+    { item: 'Correspondence records', required: true },
+    { item: 'Payment receipts/invoices', required: true },
+    { item: 'Breach notification letters', required: false },
+    { item: 'Expert assessment of damages', required: false }
+  ],
+  property_dispute: [
+    { item: 'Property title deeds', required: true },
+    { item: 'Survey records', required: true },
+    { item: 'Property tax receipts', required: true },
+    { item: 'Encumbrance certificate', required: false },
+    { item: 'Mutation records', required: false }
+  ],
+  criminal: [
+    { item: 'First Information Report (FIR)', required: true },
+    { item: 'Chargesheet', required: true },
+    { item: 'Witness depositions', required: true },
+    { item: 'Forensic laboratory reports', required: false },
+    { item: 'Case diary notes', required: false }
+  ],
+  family: [
+    { item: 'Marriage certificate', required: true },
+    { item: 'Birth certificates of children', required: false },
+    { item: 'Income proof documents', required: true },
+    { item: 'Property valuation documents', required: false }
+  ],
+  default: [
+    { item: 'Identity proof of parties', required: true },
+    { item: 'Address proof', required: true },
+    { item: 'Relevant supporting documents', required: true }
+  ]
+}
+
+const PROCEDURAL_TIMELINES = {
+  India: {
+    civil: {
+      simple: [
+        { stage: 'Filing of Plaint', deadline: 'Day 0', duration: null },
+        { stage: 'Service of Summons', deadline: '7 days', duration: 7 },
+        { stage: 'Written Statement', deadline: '30 days', duration: 30 },
+        { stage: 'Replication', deadline: '15 days', duration: 15 },
+        { stage: 'Framing of Issues', deadline: '7 days', duration: 7 },
+        { stage: 'Evidence (Plaintiff)', deadline: '30 days', duration: 30 },
+        { stage: 'Evidence (Defendant)', deadline: '30 days', duration: 30 },
+        { stage: 'Final Arguments', deadline: '15 days', duration: 15 },
+        { stage: 'Judgment', deadline: '30 days', duration: 30 }
+      ],
+      complex: [
+        { stage: 'Filing of Plaint', deadline: 'Day 0', duration: null },
+        { stage: 'Service of Summons', deadline: '14 days', duration: 14 },
+        { stage: 'Written Statement', deadline: '60 days', duration: 60 },
+        { stage: 'Replication', deadline: '30 days', duration: 30 },
+        { stage: 'Framing of Issues', deadline: '14 days', duration: 14 },
+        { stage: 'Discovery & Interrogatories', deadline: '60 days', duration: 60 },
+        { stage: 'Evidence (Plaintiff)', deadline: '60 days', duration: 60 },
+        { stage: 'Evidence (Defendant)', deadline: '60 days', duration: 60 },
+        { stage: 'Cross-Examination', deadline: '30 days', duration: 30 },
+        { stage: 'Final Arguments', deadline: '30 days', duration: 30 },
+        { stage: 'Judgment', deadline: '60 days', duration: 60 }
+      ]
+    },
+    criminal: {
+      summary: [
+        { stage: 'FIR Registration', deadline: 'Day 0', duration: null },
+        { stage: 'Investigation Completion', deadline: '60 days', duration: 60 },
+        { stage: 'Chargesheet Filing', deadline: '90 days', duration: 90 },
+        { stage: 'Framing of Charges', deadline: '14 days', duration: 14 },
+        { stage: 'Evidence Stage', deadline: '30 days', duration: 30 },
+        { stage: 'Arguments', deadline: '14 days', duration: 14 },
+        { stage: 'Judgment', deadline: '30 days', duration: 30 }
+      ],
+      cognizable: [
+        { stage: 'FIR Registration', deadline: 'Day 0', duration: null },
+        { stage: 'Investigation', deadline: '90 days', duration: 90 },
+        { stage: 'Chargesheet/Closure Report', deadline: '180 days', duration: 180 },
+        { stage: 'Commencement of Trial', deadline: '30 days', duration: 30 },
+        { stage: 'Prosecution Evidence', deadline: '120 days', duration: 120 },
+        { stage: 'Defense Evidence', deadline: '60 days', duration: 60 },
+        { stage: 'Final Arguments', deadline: '30 days', duration: 30 },
+        { stage: 'Judgment', deadline: '60 days', duration: 60 }
+      ]
+    }
+  },
+  UK: {
+    civil: {
+      small_claims: [
+        { stage: 'Issue Claim Form', deadline: 'Day 0', duration: null },
+        { stage: 'Response (Admission/Defence)', deadline: '14 days', duration: 14 },
+        { stage: 'Directions Questionnaire', deadline: '14 days', duration: 14 },
+        { stage: 'Listing for Hearing', deadline: '30 days', duration: 30 },
+        { stage: 'Hearing', deadline: 'Variable', duration: null }
+      ],
+      fast_track: [
+        { stage: 'Issue Claim Form', deadline: 'Day 0', duration: null },
+        { stage: 'Acknowledgment of Service', deadline: '14 days', duration: 14 },
+        { stage: 'Defence', deadline: '28 days', duration: 28 },
+        { stage: 'Case Management Conference', deadline: '14 days', duration: 14 },
+        { stage: 'Disclosure', deadline: '14 days', duration: 14 },
+        { stage: 'Exchange of Expert Reports', deadline: '28 days', duration: 28 },
+        { stage: 'Trial', deadline: '30 weeks', duration: 210 }
+      ]
+    }
+  },
+  UAE: {
+    civil: {
+      summary: [
+        { stage: 'Filing of Claim', deadline: 'Day 0', duration: null },
+        { stage: 'Service of Claim', deadline: '7 days', duration: 7 },
+        { stage: 'Response', deadline: '15 days', duration: 15 },
+        { stage: 'Judgment', deadline: '30 days', duration: 30 }
+      ],
+      ordinary: [
+        { stage: 'Filing of Claim', deadline: 'Day 0', duration: null },
+        { stage: 'Service of Claim', deadline: '14 days', duration: 14 },
+        { stage: 'Written Response', deadline: '30 days', duration: 30 },
+        { stage: 'Reply/Rejoinder', deadline: '15 days', duration: 15 },
+        { stage: 'First Hearing', deadline: '30 days', duration: 30 },
+        { stage: 'Evidentiary Stage', deadline: '60 days', duration: 60 },
+        { stage: 'Judgment', deadline: '30 days', duration: 30 }
+      ]
+    }
+  }
+}
+
+const classifyCaseType = (description, domainHint) => {
+  const desc = (description + ' ' + (domainHint || '')).toLowerCase()
+  
+  if (desc.includes('injury') || desc.includes('accident') || desc.includes('damage') || desc.includes('compensation')) {
+    return 'personal_injury'
+  }
+  if (desc.includes('contract') || desc.includes('agreement') || desc.includes('breach') || desc.includes('violation')) {
+    return 'contract_dispute'
+  }
+  if (desc.includes('property') || desc.includes('land') || desc.includes('boundary') || desc.includes('possession') || desc.includes('title')) {
+    return 'property_dispute'
+  }
+  if (desc.includes('criminal') || desc.includes('fraud') || desc.includes('theft') || desc.includes('assault') || desc.includes('fir')) {
+    return 'criminal'
+  }
+  if (desc.includes('divorce') || desc.includes('custody') || desc.includes('maintenance') || desc.includes('marriage')) {
+    return 'family'
+  }
+  
+  return domainHint?.toLowerCase() || 'default'
+}
+
+const getEvidenceRequirements = (caseType) => {
+  return EVIDENCE_REQUIREMENTS[caseType] || EVIDENCE_REQUIREMENTS.default
+}
+
+const getProceduralTimeline = (jurisdiction, caseType, complexity = 'simple') => {
+  const jurisdictionData = PROCEDURAL_TIMELINES[jurisdiction]
+  if (!jurisdictionData) {
+    return PROCEDURAL_TIMELINES.India.civil.simple
+  }
+  
+  const category = caseType === 'criminal' ? 'criminal' : 'civil'
+  const complexityKey = complexity === 'complex' ? 'complex' : 
+                        complexity === 'summary' ? 'summary' : 
+                        complexity === 'cognizable' ? 'cognizable' :
+                        complexity === 'fast_track' ? 'fast_track' :
+                        complexity === 'small_claims' ? 'small_claims' : 'simple'
+  
+  return jurisdictionData[category]?.[complexityKey] || PROCEDURAL_TIMELINES.India.civil.simple
+}
+
+const calculateTimeline = (baseDate, timeline) => {
+  let currentDate = new Date(baseDate)
+  
+  return timeline.map((item, index) => {
+    const milestone = { ...item }
+    
+    if (item.duration) {
+      currentDate = new Date(currentDate.getTime() + item.duration * 24 * 60 * 60 * 1000)
+      milestone.estimatedDate = currentDate.toLocaleDateString('en-GB', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric'
+      })
+    } else {
+      milestone.estimatedDate = 'Immediate'
+    }
+    
+    milestone.milestone = index + 1
+    return milestone
+  })
+}
+
 const LegalDecisionDocument = ({ onResponseReceived }) => {
   const [intakeData, setIntakeData] = useState({
     caseDescription: '',
@@ -500,6 +699,172 @@ const LegalDecisionDocument = ({ onResponseReceived }) => {
                 </div>
               </div>
             )}
+          </DocumentSection>
+
+          {/* SECTION 3B: Evidence Requirements */}
+          <DocumentSection>
+            <SectionHeader number="III-B" title="Evidence Requirements" />
+            
+            <div style={{ 
+              padding: '12px 16px', 
+              background: 'rgba(255, 193, 7, 0.08)', 
+              border: '1px solid rgba(255, 193, 7, 0.2)',
+              borderRadius: '6px',
+              marginBottom: '16px'
+            }}>
+              <div style={{ color: '#ffc107', fontSize: '12px', fontWeight: '600', marginBottom: '4px' }}>
+                BURDEN OF PROOF: {intakeData.caseType?.toUpperCase() || classifyCaseType(intakeData.caseDescription, intakeData.jurisdiction).toUpperCase()}
+              </div>
+              <div style={{ color: 'rgba(255,255,255,0.7)', fontSize: '11px' }}>
+                The party asserting a claim bears the burden of proving the essential elements by{' '}
+                {classifyCaseType(intakeData.caseDescription, intakeData.caseType) === 'criminal' ? 'beyond reasonable doubt' : 'preponderance of evidence'}.
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gap: '10px' }}>
+              {getEvidenceRequirements(classifyCaseType(intakeData.caseDescription, intakeData.caseType)).map((evidence, idx) => (
+                <div key={idx} style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '10px 14px',
+                  background: evidence.required ? 'rgba(40, 167, 69, 0.08)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${evidence.required ? 'rgba(40, 167, 69, 0.3)' : 'rgba(255,255,255,0.1)'}`,
+                  borderRadius: '6px'
+                }}>
+                  <div style={{
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: evidence.required ? '#28a745' : 'rgba(255,255,255,0.2)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    {evidence.required && (
+                      <svg width="12" height="12" viewBox="0 0 12 12" fill="white">
+                        <path d="M10 3L4.5 8.5L2 6" stroke="white" strokeWidth="2" fill="none"/>
+                      </svg>
+                    )}
+                  </div>
+                  <span style={{ 
+                    color: '#fff', 
+                    fontSize: '13px',
+                    fontWeight: evidence.required ? '500' : '400'
+                  }}>
+                    {evidence.item}
+                  </span>
+                  {evidence.required && (
+                    <span style={{
+                      marginLeft: 'auto',
+                      padding: '2px 8px',
+                      background: 'rgba(220, 53, 69, 0.15)',
+                      border: '1px solid rgba(220, 53, 69, 0.3)',
+                      borderRadius: '4px',
+                      color: '#ffc107',
+                      fontSize: '10px',
+                      fontWeight: '600'
+                    }}>
+                      MANDATORY
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </DocumentSection>
+
+          {/* SECTION 3C: Procedural Timeline */}
+          <DocumentSection>
+            <SectionHeader number="III-C" title="Procedural Timeline" />
+            
+            <div style={{ 
+              display: 'flex', 
+              gap: '20px', 
+              marginBottom: '16px',
+              flexWrap: 'wrap'
+            }}>
+              <div style={{ 
+                padding: '10px 14px', 
+                background: 'rgba(59, 130, 246, 0.1)', 
+                border: '1px solid rgba(59, 130, 246, 0.3)',
+                borderRadius: '6px'
+              }}>
+                <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '10px', marginBottom: '2px' }}>JURISDICTION</div>
+                <div style={{ color: '#fff', fontSize: '13px', fontWeight: '600' }}>{intakeData.jurisdiction}</div>
+              </div>
+              <div style={{ 
+                padding: '10px 14px', 
+                background: 'rgba(139, 92, 246, 0.1)', 
+                border: '1px solid rgba(139, 92, 246, 0.3)',
+                borderRadius: '6px'
+              }}>
+                <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '10px', marginBottom: '2px' }}>COMPLEXITY</div>
+                <div style={{ color: '#fff', fontSize: '13px', fontWeight: '600' }}>Standard</div>
+              </div>
+            </div>
+
+            <div style={{ position: 'relative', paddingLeft: '30px' }}>
+              {calculateTimeline(new Date(), getProceduralTimeline(intakeData.jurisdiction, classifyCaseType(intakeData.caseDescription, intakeData.caseType))).map((item, idx) => (
+                <div key={idx} style={{
+                  position: 'relative',
+                  paddingBottom: idx < getProceduralTimeline(intakeData.jurisdiction, classifyCaseType(intakeData.caseDescription, intakeData.caseType)).length - 1 ? '20px' : '0'
+                }}>
+                  {/* Timeline connector */}
+                  {idx < getProceduralTimeline(intakeData.jurisdiction, classifyCaseType(intakeData.caseDescription, intakeData.caseType)).length - 1 && (
+                    <div style={{
+                      position: 'absolute',
+                      left: '-23px',
+                      top: '24px',
+                      width: '2px',
+                      height: 'calc(100% - 20px)',
+                      background: 'rgba(59, 130, 246, 0.3)'
+                    }} />
+                  )}
+                  
+                  {/* Timeline dot */}
+                  <div style={{
+                    position: 'absolute',
+                    left: '-30px',
+                    top: '0',
+                    width: '16px',
+                    height: '16px',
+                    borderRadius: '50%',
+                    background: idx === 0 ? '#28a745' : '#3b82f6',
+                    border: '3px solid rgba(255,255,255,0.1)',
+                    zIndex: 1
+                  }} />
+
+                  <div style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '12px'
+                  }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ color: '#fff', fontSize: '13px', fontWeight: '500', marginBottom: '4px' }}>
+                        {item.stage}
+                      </div>
+                      <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '11px' }}>
+                        {item.deadline !== 'Day 0' && item.deadline !== 'Immediate' ? `Deadline: ${item.deadline}` : item.deadline}
+                      </div>
+                    </div>
+                    <div style={{
+                      padding: '4px 10px',
+                      background: 'rgba(59, 130, 246, 0.15)',
+                      border: '1px solid rgba(59, 130, 246, 0.3)',
+                      borderRadius: '4px',
+                      color: '#3b82f6',
+                      fontSize: '11px',
+                      fontWeight: '600',
+                      whiteSpace: 'nowrap'
+                    }}>
+                      {item.estimatedDate}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </DocumentSection>
 
           {/* SECTION 4: Conclusion / Order */}
