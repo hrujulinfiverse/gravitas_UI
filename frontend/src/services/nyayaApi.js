@@ -6,6 +6,11 @@ import { BASE_URL } from '../lib/apiConfig'
 
 const API_BASE_URL = BASE_URL
 
+// Global failure listeners — registered by useResiliency
+const _failureListeners = new Set()
+export const onBackendFailure = (fn) => { _failureListeners.add(fn); return () => _failureListeners.delete(fn) }
+const _emitFailure = (error) => _failureListeners.forEach(fn => fn(error))
+
 // Configure axios instance
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -15,11 +20,19 @@ const apiClient = axios.create({
   }
 })
 
-// Response interceptor for error handling
+// Global interceptor — detects 5xx errors and ECONNREFUSED/timeout
 apiClient.interceptors.response.use(
   (response) => response,
   (error) => {
-    console.error('API Error:', error)
+    const status = error.response?.status
+    const isServerError = status >= 500
+    const isNetworkError = !error.response && (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error')
+    const isTimeout = error.code === 'ECONNABORTED'
+
+    if (isServerError || isNetworkError || isTimeout) {
+      _emitFailure(error)
+    }
+
     return Promise.reject(error)
   }
 )

@@ -24,7 +24,9 @@ import LawAgentView from './components/LawAgentView.jsx'
 import DecisionPage from './components/DecisionPage.jsx'
 import LegalDecisionDocument from './components/LegalDecisionDocument.jsx'
 import StaggeredMenu from './components/StaggeredMenu.jsx'
+import OfflineBanner from './components/OfflineBanner.jsx'
 import { casePresentationService } from './services/nyayaApi.js'
+import { useResiliency } from './hooks/useResiliency.js'
 
 // Case Presentation Component - Wires components to real backend data only
 // NO MOCK DATA - All data comes from real Nyaya backend (Raj's Decision Engine)
@@ -240,6 +242,10 @@ function App() {
   const [lastResponse, setLastResponse] = useState(null)
   const menuRef = useRef(null)
 
+  // Ref always holds latest case intake for offline snapshot capture
+  const caseIntakeRef = useRef(null)
+  const { isOffline, isSyncing, hasPending, persistIntake, syncToServer } = useResiliency(caseIntakeRef)
+
   useEffect(() => {
     const storedUser = localStorage.getItem('nyaya_user')
     if (storedUser) {
@@ -314,7 +320,7 @@ function App() {
               ← Back to Dashboard
             </button>
             <ErrorBoundary>
-              <LegalQueryCard onResponseReceived={setLastResponse} />
+              <LegalQueryCard onResponseReceived={setLastResponse} isOffline={isOffline} />
             </ErrorBoundary>
           </div>
         )
@@ -386,7 +392,7 @@ function App() {
               ← Back to Dashboard
             </button>
             <ErrorBoundary>
-              <LegalDecisionDocument onResponseReceived={setLastResponse} />
+              <LegalDecisionDocument onResponseReceived={setLastResponse} isOffline={isOffline} />
             </ErrorBoundary>
           </div>
         )
@@ -593,6 +599,14 @@ function App() {
       <div style={{ position: 'relative', zIndex: 1 }}>
         {renderView()}
       </div>
+
+      {/* Degraded Mode Banner — mounts globally, visible across all views */}
+      <OfflineBanner
+        isOffline={isOffline}
+        isSyncing={isSyncing}
+        hasPending={hasPending}
+        onSyncClick={() => syncToServer(casePresentationService.getAllCaseData)}
+      />
     </div>
   )
 }
