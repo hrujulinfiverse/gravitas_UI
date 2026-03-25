@@ -1,31 +1,19 @@
 import React from 'react';
+import ApiErrorState from './ApiErrorState.jsx';
+import SkeletonLoader from './SkeletonLoader.jsx';
 
-const LegalRouteCard = ({ routes, jurisdiction, caseType, traceId }) => {
-  // Error handling for missing required data
-  if (!routes || !Array.isArray(routes) || routes.length === 0 || !jurisdiction || !caseType) {
+const LegalRouteCard = ({ routes, jurisdiction, caseType, traceId, loading, error, onRetry }) => {
+  if (loading) return <SkeletonLoader type="card" count={3} />
+
+  if (error || !routes || !Array.isArray(routes) || routes.length === 0 || !jurisdiction) {
     return (
-      <div className="consultation-card">
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <h3 style={{ color: '#dc3545', marginBottom: '10px' }}>Information will appear here once available</h3>
-          <p style={{ color: '#6c757d' }}>
-            Legal route data is currently unavailable or incomplete.
-          </p>
-          {/* Display trace_id for debugging */}
-          {traceId && (
-            <div style={{ 
-              marginTop: '15px', 
-              padding: '8px', 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontFamily: 'monospace'
-            }}>
-              Trace ID: {traceId}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+      <ApiErrorState
+        title="Legal Routes Unavailable"
+        message={error || 'The backend returned an incomplete legal routes response.'}
+        traceId={traceId}
+        onRetry={onRetry}
+      />
+    )
   }
 
   const getSuitabilityColor = (suitability) => {

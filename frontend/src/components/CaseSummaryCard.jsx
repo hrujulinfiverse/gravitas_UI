@@ -1,4 +1,6 @@
 import React from 'react';
+import ApiErrorState from './ApiErrorState.jsx';
+import SkeletonLoader from './SkeletonLoader.jsx';
 
 const CaseSummaryCard = ({
   caseId,
@@ -11,33 +13,22 @@ const CaseSummaryCard = ({
   dateFiled,
   status,
   parties,
-  traceId
+  traceId,
+  loading,
+  error,
+  onRetry
 }) => {
-  // Error handling for missing required data
-  if (!title || !overview || !keyFacts || !jurisdiction || confidence === undefined || !summaryAnalysis) {
+  if (loading) return <SkeletonLoader type="card" count={4} />
+
+  if (error || !title || !overview || !jurisdiction || confidence == null || !summaryAnalysis) {
     return (
-      <div className="consultation-card">
-        <div style={{ textAlign: 'center', padding: '20px' }}>
-          <h3 style={{ color: '#dc3545', marginBottom: '10px' }}>Information will appear here once available</h3>
-          <p style={{ color: '#6c757d' }}>
-            Case summary data is currently unavailable or incomplete.
-          </p>
-          {/* Display trace_id for debugging */}
-          {traceId && (
-            <div style={{ 
-              marginTop: '15px', 
-              padding: '8px', 
-              backgroundColor: '#f8f9fa', 
-              borderRadius: '4px',
-              fontSize: '12px',
-              fontFamily: 'monospace'
-            }}>
-              Trace ID: {traceId}
-            </div>
-          )}
-        </div>
-      </div>
-    );
+      <ApiErrorState
+        title="Case Summary Unavailable"
+        message={error || 'The backend returned an incomplete case summary response.'}
+        traceId={traceId}
+        onRetry={onRetry}
+      />
+    )
   }
 
   return (

@@ -1,9 +1,9 @@
 import React from 'react';
+import ApiErrorState from './ApiErrorState.jsx';
 
-const JurisdictionInfoBar = ({ country, courtSystem, authorityFraming, emergencyGuidance }) => {
-  // Don't render if data is missing
-  if (!country || !courtSystem || !authorityFraming || !emergencyGuidance) {
-    return null;
+const JurisdictionInfoBar = ({ country, courtSystem, authorityFraming, emergencyGuidance, legalFramework, limitationAct, constitution }) => {
+  if (!country || !courtSystem) {
+    return null
   }
 
   return (
@@ -69,7 +69,7 @@ const JurisdictionInfoBar = ({ country, courtSystem, authorityFraming, emergency
             fontSize: '14px',
             lineHeight: '1.6'
           }}>
-            Emergency guidance is available through local legal resources and authorities.
+            {emergencyGuidance}
           </p>
         </div>
       </div>

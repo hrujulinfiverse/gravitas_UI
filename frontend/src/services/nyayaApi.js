@@ -20,6 +20,15 @@ const apiClient = axios.create({
   }
 })
 
+// Request interceptor — inject active trace_id into every request header for backend logging
+apiClient.interceptors.request.use((config) => {
+  const traceId = window.__gravitas_active_trace_id
+  if (traceId) {
+    config.headers['X-Trace-ID'] = traceId
+  }
+  return config
+})
+
 // Global interceptor — detects 5xx errors and ECONNREFUSED/timeout
 apiClient.interceptors.response.use(
   (response) => response,
@@ -37,6 +46,11 @@ apiClient.interceptors.response.use(
   }
 )
 
+// Set the active trace_id so the request interceptor can inject it
+export const setActiveTraceId = (traceId) => {
+  window.__gravitas_active_trace_id = traceId || null
+}
+
 function generateTraceId() {
   return 'frontend_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9)
 }
@@ -49,18 +63,17 @@ export const casePresentationService = {
       const response = await apiClient.get('/nyaya/case_summary', {
         params: { trace_id: traceId, jurisdiction }
       })
-      
       return {
         success: true,
         data: this._validateCaseSummary(response.data),
         trace_id: traceId
       }
     } catch (error) {
-      // Return empty state with error info for graceful degradation
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch case summary',
-        trace_id: traceId,
+        error: error.response?.data?.message || error.message,
+        http_status: error.response?.status ?? null,
+        trace_id: error.response?.data?.trace_id || traceId,
         data: null
       }
     }
@@ -72,7 +85,6 @@ export const casePresentationService = {
       const response = await apiClient.get('/nyaya/legal_routes', {
         params: { trace_id: traceId, jurisdiction, case_type: caseType }
       })
-      
       return {
         success: true,
         data: this._validateLegalRoutes(response.data),
@@ -81,8 +93,9 @@ export const casePresentationService = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch legal routes',
-        trace_id: traceId,
+        error: error.response?.data?.message || error.message,
+        http_status: error.response?.status ?? null,
+        trace_id: error.response?.data?.trace_id || traceId,
         data: null
       }
     }
@@ -94,7 +107,6 @@ export const casePresentationService = {
       const response = await apiClient.get('/nyaya/timeline', {
         params: { trace_id: traceId, jurisdiction, case_id: caseId }
       })
-      
       return {
         success: true,
         data: this._validateTimeline(response.data),
@@ -103,8 +115,9 @@ export const casePresentationService = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch timeline',
-        trace_id: traceId,
+        error: error.response?.data?.message || error.message,
+        http_status: error.response?.status ?? null,
+        trace_id: error.response?.data?.trace_id || traceId,
         data: null
       }
     }
@@ -116,7 +129,6 @@ export const casePresentationService = {
       const response = await apiClient.get('/nyaya/glossary', {
         params: { trace_id: traceId, jurisdiction, case_type: caseType }
       })
-      
       return {
         success: true,
         data: this._validateGlossary(response.data),
@@ -125,8 +137,9 @@ export const casePresentationService = {
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch glossary',
-        trace_id: traceId,
+        error: error.response?.data?.message || error.message,
+        http_status: error.response?.status ?? null,
+        trace_id: error.response?.data?.trace_id || traceId,
         data: null
       }
     }
@@ -138,67 +151,81 @@ export const casePresentationService = {
       const response = await apiClient.get('/nyaya/jurisdiction_info', {
         params: { jurisdiction }
       })
-      
-      return {
-        success: true,
-        data: response.data
+      const data = response.data
+      if (!data || !data.courtSystem || !data.country) {
+        throw new Error('Jurisdiction info response missing required fields: country, courtSystem')
       }
+      return { success: true, data }
     } catch (error) {
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch jurisdiction info',
+        error: error.response?.data?.message || error.message,
+        http_status: error.response?.status ?? null,
         data: null
       }
     }
   },
 
-  // Fetch enforcement status from backend
+  // Fetch enforcement status from backend — never defaults to 'clear' on failure
   async getEnforcementStatus(traceId, jurisdiction) {
     try {
       const response = await apiClient.get('/nyaya/enforcement_status', {
         params: { trace_id: traceId, jurisdiction }
       })
-      
+      const data = response.data
+      if (!data || !data.verdict || !data.state) {
+        throw new Error('Enforcement status response missing required fields: verdict, state')
+      }
       return {
         success: true,
-        data: this._validateEnforcementStatus(response.data),
+        data: this._validateEnforcementStatus(data),
         trace_id: traceId
       }
     } catch (error) {
-      // Return empty status on error - don't break the UI
+      // On any failure, verdict is NON_ENFORCEABLE — never silently pass as clear
       return {
         success: false,
-        error: error.response?.data?.message || error.message || 'Failed to fetch enforcement status',
+        error: error.response?.data?.message || error.message || 'Enforcement status could not be verified',
         trace_id: traceId,
-        data: { state: 'clear', reason: '', safe_explanation: '' }
+        data: {
+          state: 'block',
+          verdict: 'NON_ENFORCEABLE',
+          reason: 'Enforcement status could not be verified.',
+          barriers: ['Verification endpoint unreachable or returned invalid data'],
+          blocked_path: null,
+          escalation_required: false,
+          escalation_target: null,
+          redirect_suggestion: null,
+          safe_explanation: 'This decision cannot be displayed until enforcement status is confirmed.',
+          trace_id: traceId
+        }
       }
     }
   },
 
-  // Validate enforcement status
+  // Validate enforcement status — throws if required fields are absent
   _validateEnforcementStatus(data) {
-    if (!data || typeof data !== 'object') {
-      return {
-        state: 'clear',
-        reason: '',
-        blocked_path: null,
-        escalation_required: false,
-        escalation_target: null,
-        redirect_suggestion: null,
-        safe_explanation: '',
-        trace_id: null
-      }
+    const validStates = ['block', 'escalate', 'soft_redirect', 'conditional', 'clear']
+    const validVerdicts = ['ENFORCEABLE', 'PENDING_REVIEW', 'NON_ENFORCEABLE']
+
+    if (!validStates.includes(data.state)) {
+      throw new Error(`Invalid enforcement state: ${data.state}`)
     }
-    
+    if (!validVerdicts.includes(data.verdict)) {
+      throw new Error(`Invalid enforcement verdict: ${data.verdict}`)
+    }
+
     return {
-      state: ['block', 'escalate', 'soft_redirect', 'conditional', 'clear'].includes(data.state) ? data.state : 'clear',
-      reason: data.reason || '',
-      blocked_path: data.blocked_path || null,
+      state: data.state,
+      verdict: data.verdict,
+      reason: data.reason ?? '',
+      barriers: Array.isArray(data.barriers) ? data.barriers : [],
+      blocked_path: data.blocked_path ?? null,
       escalation_required: Boolean(data.escalation_required),
-      escalation_target: data.escalation_target || null,
-      redirect_suggestion: data.redirect_suggestion || null,
-      safe_explanation: data.safe_explanation || '',
-      trace_id: data.trace_id || null
+      escalation_target: data.escalation_target ?? null,
+      redirect_suggestion: data.redirect_suggestion ?? null,
+      safe_explanation: data.safe_explanation ?? '',
+      trace_id: data.trace_id ?? null
     }
   },
 
@@ -233,107 +260,110 @@ export const casePresentationService = {
     }
   },
 
-  // Validation methods for empty/partial/edge cases
+  // Strict validators — throw on missing required fields, never coerce to fallback strings
+
   _validateCaseSummary(data) {
-    if (!data || typeof data !== 'object') {
-      return {
-        caseId: null,
-        title: null,
-        overview: null,
-        keyFacts: [],
-        jurisdiction: null,
-        confidence: null,
-        summaryAnalysis: null,
-        dateFiled: null,
-        status: null,
-        parties: null
+    if (!data || typeof data !== 'object') throw new Error('Case summary response is null or not an object')
+    const required = ['title', 'overview', 'jurisdiction', 'confidence', 'summaryAnalysis']
+    for (const field of required) {
+      if (data[field] == null || data[field] === '') {
+        throw new Error(`Case summary missing required field: ${field}`)
       }
     }
-    
+    if (typeof data.confidence !== 'number' || data.confidence < 0 || data.confidence > 1) {
+      throw new Error(`Case summary confidence out of range: ${data.confidence}`)
+    }
     return {
-      caseId: data.caseId || null,
-      title: data.title || null,
-      overview: data.overview || null,
+      caseId: data.caseId ?? null,
+      title: data.title,
+      overview: data.overview,
       keyFacts: Array.isArray(data.keyFacts) ? data.keyFacts : [],
-      jurisdiction: data.jurisdiction || null,
-      confidence: typeof data.confidence === 'number' ? data.confidence : null,
-      summaryAnalysis: data.summaryAnalysis || null,
-      dateFiled: data.dateFiled || null,
-      status: data.status || null,
-      parties: data.parties || null
+      jurisdiction: data.jurisdiction,
+      confidence: data.confidence,
+      summaryAnalysis: data.summaryAnalysis,
+      dateFiled: data.dateFiled ?? null,
+      status: data.status ?? null,
+      parties: data.parties ?? null
     }
   },
 
   _validateLegalRoutes(data) {
-    if (!data || typeof data !== 'object') {
-      return {
-        routes: [],
-        jurisdiction: null,
-        caseType: null
-      }
+    if (!data || typeof data !== 'object') throw new Error('Legal routes response is null or not an object')
+    if (!Array.isArray(data.routes) || data.routes.length === 0) {
+      throw new Error('Legal routes response contains no routes')
     }
-    
+    if (!data.jurisdiction) throw new Error('Legal routes response missing required field: jurisdiction')
     return {
-      routes: Array.isArray(data.routes) ? data.routes.map(route => ({
-        name: route.name || 'Unknown Route',
-        description: route.description || '',
-        recommendation: route.recommendation || '',
-        suitability: typeof route.suitability === 'number' ? route.suitability : 0.5,
-        estimatedDuration: route.estimatedDuration || null,
-        estimatedCost: route.estimatedCost || null,
-        pros: Array.isArray(route.pros) ? route.pros : [],
-        cons: Array.isArray(route.cons) ? route.cons : []
-      })) : [],
-      jurisdiction: data.jurisdiction || null,
-      caseType: data.caseType || null
+      routes: data.routes.map((route, i) => {
+        if (!route.name) throw new Error(`Route[${i}] missing required field: name`)
+        if (typeof route.suitability !== 'number') throw new Error(`Route[${i}] missing required field: suitability`)
+        return {
+          name: route.name,
+          description: route.description ?? '',
+          recommendation: route.recommendation ?? '',
+          suitability: route.suitability,
+          estimatedDuration: route.estimatedDuration ?? null,
+          estimatedCost: route.estimatedCost ?? null,
+          pros: Array.isArray(route.pros) ? route.pros : [],
+          cons: Array.isArray(route.cons) ? route.cons : []
+        }
+      }),
+      jurisdiction: data.jurisdiction,
+      caseType: data.caseType ?? null
     }
   },
 
   _validateTimeline(data) {
-    if (!data || typeof data !== 'object') {
-      return {
-        events: [],
-        jurisdiction: null,
-        caseId: null
-      }
+    if (!data || typeof data !== 'object') throw new Error('Timeline response is null or not an object')
+    if (!Array.isArray(data.events) || data.events.length === 0) {
+      throw new Error('Timeline response contains no events')
     }
-    
+    if (!data.jurisdiction) throw new Error('Timeline response missing required field: jurisdiction')
+    const validTypes = ['event', 'deadline', 'milestone', 'step']
+    const validStatuses = ['completed', 'pending', 'overdue']
     return {
-      events: Array.isArray(data.events) ? data.events.map(event => ({
-        id: event.id || `event_${Math.random().toString(36).substr(2, 9)}`,
-        date: event.date || new Date().toISOString(),
-        title: event.title || 'Untitled Event',
-        description: event.description || '',
-        type: ['event', 'deadline', 'milestone', 'step'].includes(event.type) ? event.type : 'event',
-        status: ['completed', 'pending', 'overdue'].includes(event.status) ? event.status : 'pending',
-        documents: Array.isArray(event.documents) ? event.documents : [],
-        parties: Array.isArray(event.parties) ? event.parties : []
-      })) : [],
-      jurisdiction: data.jurisdiction || null,
-      caseId: data.caseId || null
+      events: data.events.map((event, i) => {
+        if (!event.title) throw new Error(`Timeline event[${i}] missing required field: title`)
+        if (!event.date) throw new Error(`Timeline event[${i}] missing required field: date`)
+        if (!validTypes.includes(event.type)) throw new Error(`Timeline event[${i}] invalid type: ${event.type}`)
+        if (!validStatuses.includes(event.status)) throw new Error(`Timeline event[${i}] invalid status: ${event.status}`)
+        return {
+          id: event.id ?? `event_${i}`,
+          date: event.date,
+          title: event.title,
+          description: event.description ?? '',
+          type: event.type,
+          status: event.status,
+          documents: Array.isArray(event.documents) ? event.documents : [],
+          parties: Array.isArray(event.parties) ? event.parties : []
+        }
+      }),
+      jurisdiction: data.jurisdiction,
+      caseId: data.caseId ?? null
     }
   },
 
   _validateGlossary(data) {
-    if (!data || typeof data !== 'object') {
-      return {
-        terms: [],
-        jurisdiction: null,
-        caseType: null
-      }
+    if (!data || typeof data !== 'object') throw new Error('Glossary response is null or not an object')
+    if (!Array.isArray(data.terms) || data.terms.length === 0) {
+      throw new Error('Glossary response contains no terms')
     }
-    
+    if (!data.jurisdiction) throw new Error('Glossary response missing required field: jurisdiction')
     return {
-      terms: Array.isArray(data.terms) ? data.terms.map(term => ({
-        term: term.term || 'Unknown Term',
-        definition: term.definition || '',
-        context: term.context || null,
-        relatedTerms: Array.isArray(term.relatedTerms) ? term.relatedTerms : [],
-        jurisdiction: term.jurisdiction || null,
-        confidence: typeof term.confidence === 'number' ? term.confidence : null
-      })) : [],
-      jurisdiction: data.jurisdiction || null,
-      caseType: data.caseType || null
+      terms: data.terms.map((term, i) => {
+        if (!term.term) throw new Error(`Glossary term[${i}] missing required field: term`)
+        if (!term.definition) throw new Error(`Glossary term[${i}] missing required field: definition`)
+        return {
+          term: term.term,
+          definition: term.definition,
+          context: term.context ?? null,
+          relatedTerms: Array.isArray(term.relatedTerms) ? term.relatedTerms : [],
+          jurisdiction: term.jurisdiction ?? null,
+          confidence: typeof term.confidence === 'number' ? term.confidence : null
+        }
+      }),
+      jurisdiction: data.jurisdiction,
+      caseType: data.caseType ?? null
     }
   }
 }
