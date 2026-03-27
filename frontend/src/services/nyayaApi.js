@@ -1,5 +1,6 @@
 // Nyaya AI API Integration Service
 // Connects frontend to the existing Nyaya AI backend
+// Includes global interceptor for 5xx errors that routes to ServiceOutage
 
 import axios from 'axios'
 import { BASE_URL } from '../lib/apiConfig'
@@ -10,6 +11,30 @@ const API_BASE_URL = BASE_URL
 const _failureListeners = new Set()
 export const onBackendFailure = (fn) => { _failureListeners.add(fn); return () => _failureListeners.delete(fn) }
 const _emitFailure = (error) => _failureListeners.forEach(fn => fn(error))
+
+// Service outage state - components can subscribe to this
+let _isServiceOutage = false
+let _serviceOutageError = null
+const _outageListeners = new Set()
+
+export const onServiceOutage = (fn) => {
+  _outageListeners.add(fn)
+  // Immediately notify of current state
+  if (_isServiceOutage) fn({ isOutage: true, error: _serviceOutageError })
+  return () => _outageListeners.delete(fn)
+}
+const _emitOutage = (error) => {
+  _isServiceOutage = true
+  _serviceOutageError = error
+  _outageListeners.forEach(fn => fn({ isOutage: true, error }))
+}
+// Clear outage when backend recovers
+export const clearServiceOutage = () => {
+  _isServiceOutage = false
+  _serviceOutageError = null
+  _outageListeners.forEach(fn => fn({ isOutage: false, error: null }))
+}
+export const isBackendOutage = () => _isServiceOutage
 
 // Configure axios instance
 const apiClient = axios.create({
@@ -30,16 +55,43 @@ apiClient.interceptors.request.use((config) => {
 })
 
 // Global interceptor — detects 5xx errors and ECONNREFUSED/timeout
+// Routes to ServiceOutage component when backend is down
 apiClient.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    // Clear any previous service outage on successful response
+    if (_isServiceOutage) {
+      clearServiceOutage()
+    }
+    return response
+  },
   (error) => {
     const status = error.response?.status
     const isServerError = status >= 500
-    const isNetworkError = !error.response && (error.code === 'ECONNREFUSED' || error.code === 'ERR_NETWORK' || error.message === 'Network Error')
-    const isTimeout = error.code === 'ECONNABORTED'
+    const isNetworkError = !error.response && (
+      error.code === 'ECONNREFUSED' || 
+      error.code === 'ERR_NETWORK' || 
+      error.code === 'ERR_CONNECTION_REFUSED' ||
+      error.message === 'Network Error' ||
+      error.message.includes('Failed to fetch')
+    )
+    const isTimeout = error.code === 'ECONNABORTED' || error.code === 'ETIMEDOUT'
+    
+    // Capture error details for the outage handler
+    const errorDetails = {
+      status,
+      isServerError,
+      isNetworkError,
+      isTimeout,
+      message: error.message,
+      code: error.code,
+      trace_id: error.response?.data?.trace_id || window.__gravitas_active_trace_id || null,
+      timestamp: new Date().toISOString()
+    }
 
     if (isServerError || isNetworkError || isTimeout) {
-      _emitFailure(error)
+      console.error('[API Interceptor] Backend failure detected:', errorDetails)
+      _emitFailure(errorDetails)
+      _emitOutage(errorDetails)
     }
 
     return Promise.reject(error)
