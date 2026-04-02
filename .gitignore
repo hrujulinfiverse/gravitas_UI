@@ -1,5 +1,7 @@
 # Dependencies
 node_modules/
+frontend/node_modules/
+**/node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
@@ -7,19 +9,29 @@ yarn-error.log*
 # Build outputs
 dist/
 build/
+frontend/dist/
+frontend/build/
+storybook-static/
+frontend/storybook-static/
+
+# Vite cache
 .vite/
-
-# Cache directories
-.cache/
-.storybook-cache/
-frontend/node_modules/.cache/
 frontend/node_modules/.vite/
+frontend/node_modules/.cache/
+**/.vite/
+**/.cache/
 
-# Environment variables
+# Storybook cache / logs
+debug-storybook.log
+frontend/debug-storybook.log
+
+# Environment variables — keep .env out of version control
+.env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
+frontend/.env
 
 # IDE files
 .vscode/
@@ -42,4 +54,4 @@ logs/
 
 # Temporary files
 *.tmp
-*.temp
+*.temp

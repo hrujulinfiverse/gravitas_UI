@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react'
 import FeedbackButtons from './FeedbackButtons.jsx'
 import { legalQueryService } from '../services/nyayaApi.js'
+import AudioButton from './AudioButton.jsx'
 
 const LegalQueryCard = ({ onResponseReceived }) => {
   const [query, setQuery] = useState('')
@@ -166,16 +167,39 @@ const LegalQueryCard = ({ onResponseReceived }) => {
           border: '1px solid rgba(255, 255, 255, 0.1)',
           borderRadius: '16px'
         }}>
-          <h3 style={{
-            fontSize: '24px',
-            color: '#fff',
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
             marginBottom: '24px',
             borderBottom: '2px solid rgba(59, 130, 246, 0.5)',
             paddingBottom: '12px'
           }}>
-            📋 Legal Decision Document
-          </h3>
-
+            <h3 style={{
+              fontSize: '24px',
+              color: '#fff',
+              margin: 0
+            }}>
+              📋 Legal Decision Document
+            </h3>
+            <AudioButton
+              label="Listen to Analysis"
+              text={[
+                response.reasoning_trace?.legal_analysis
+                  ? `Legal Analysis: ${response.reasoning_trace.legal_analysis}`
+                  : '',
+                response.enforcement_decision
+                  ? `Enforcement Decision: ${response.enforcement_decision}.`
+                  : '',
+                response.reasoning_trace?.procedural_steps?.length > 0
+                  ? `Procedural Steps: ${response.reasoning_trace.procedural_steps.join('. ')}.`
+                  : '',
+                response.reasoning_trace?.remedies?.length > 0
+                  ? `Available Remedies: ${response.reasoning_trace.remedies.join('. ')}.`
+                  : ''
+              ].filter(Boolean).join(' ')}
+            />
+          </div>
           <div style={{ 
             display: 'grid', 
             gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',

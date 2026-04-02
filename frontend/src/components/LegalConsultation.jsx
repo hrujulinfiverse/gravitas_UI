@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { legalQueryService } from '../services/nyayaApi'
+import AudioButton from './AudioButton'
 
 const legalIssueTypes = [
   'Employment Law',
@@ -314,8 +315,18 @@ export default function LegalConsultation({ onBack }) {
         {/* Step 5 - Analysis Summary */}
         {step === 5 && (
           <div>
-            <h2 style={{ color: '#fff', fontSize: '24px', marginBottom: '32px', fontFamily: 'Merriweather, serif' }}>AI Analysis Summary</h2>
-            
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '32px' }}>
+              <h2 style={{ color: '#fff', fontSize: '24px', fontFamily: 'Merriweather, serif', margin: 0 }}>AI Analysis Summary</h2>
+              <AudioButton
+                text={[
+                  backendResponse ? `Legal issue: ${formData.issueType}.` : '',
+                  backendResponse ? `Jurisdiction: ${backendResponse.jurisdiction || formData.country}, ${formData.state}.` : '',
+                  `Recommended procedure: Initial consultation with a licensed attorney specializing in ${formData.issueType}. Document preparation. Legal filing. Resolution.`,
+                  `Estimated timeline: Initial phase 1 to 2 weeks. Preparation 2 to 4 weeks. Legal process 3 to 6 months. Resolution 6 to 12 months.`
+                ].filter(Boolean).join(' ')}
+              />
+            </div>
+
             {!backendResponse ? (
               <div style={{ textAlign: 'center', padding: '40px', color: 'rgba(255, 255, 255, 0.6)' }}>
                 Information will appear here once available

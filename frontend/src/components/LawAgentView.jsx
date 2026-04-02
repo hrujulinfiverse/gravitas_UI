@@ -1,4 +1,5 @@
 import React from 'react'
+import AudioButton from './AudioButton'
 
 const LawAgentView = ({ responseData }) => {
   if (!responseData) {
@@ -222,9 +223,21 @@ const LawAgentView = ({ responseData }) => {
           letterSpacing: '1px',
           marginBottom: '16px',
           borderBottom: `1px solid ${colors.border}`,
-          paddingBottom: '12px'
+          paddingBottom: '12px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center'
         }}>
           SECTION 5 — Enforcement Decision
+          <AudioButton
+            text={[
+              `Enforcement Decision: ${enforcementState}.`,
+              legal_analysis ? `Legal Analysis: ${legal_analysis}` : '',
+              procedural_steps && procedural_steps.length > 0
+                ? `Procedural Steps: ${procedural_steps.join('. ')}`
+                : ''
+            ].filter(Boolean).join(' ')}
+          />
         </h3>
         <div style={{ 
           fontSize: '32px', 

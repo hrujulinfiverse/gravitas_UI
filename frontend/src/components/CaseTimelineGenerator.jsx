@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import AudioButton from './AudioButton'
 
 const eventTypes = ['Notice', 'Filing', 'Agreement', 'Hearing', 'Incident']
 const countries = ['India', 'United Kingdom', 'United Arab Emirates']
@@ -331,8 +332,19 @@ export default function CaseTimelineGenerator({ onBack }) {
             padding: '32px',
             marginBottom: '24px'
           }}>
-            <h2 style={{ color: '#fff', fontSize: '20px', marginBottom: '24px', fontFamily: 'Merriweather, serif' }}>
+            <h2 style={{ color: '#fff', fontSize: '20px', marginBottom: '24px', fontFamily: 'Merriweather, serif', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               AI Generated Timeline
+              <AudioButton
+                label="Listen to Timeline"
+                text={[
+                  `Case Timeline Summary. Jurisdiction: ${jurisdiction.country}, ${jurisdiction.state}.`,
+                  generatedTimeline.events.map((e, i) =>
+                    `Event ${i + 1}: ${e.title} on ${new Date(e.date).toLocaleDateString()}. Type: ${e.type}. Stage: ${e.proceduralStage}. ${e.description || ''}`
+                  ).join(' '),
+                  `Suggested next steps: ${generatedTimeline.nextSteps.join('. ')}.`,
+                  `Statutory time gaps: ${generatedTimeline.statutoryGaps}.`
+                ].join(' ')}
+              />
             </h2>
 
             {/* Vertical Timeline */}
