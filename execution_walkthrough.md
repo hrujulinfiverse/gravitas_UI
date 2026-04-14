@@ -1,263 +1,442 @@
-# Execution Walkthrough: Full Request Lifecycle
+# execution_walkthrough.md
+# Nyaya Platform — End-to-End Execution Walkthrough
 
-This document traces a single legal query from user input to rendered UI, step by step, referencing the exact files and functions involved at each stage.
-
----
-
-## Scenario
-
-User navigates to the Decision module and submits:
-> "What are the procedures for filing a civil suit in India?"
+**Purpose:** Step-by-step trace of a single legal query from the moment a user types in the React UI to the moment a validated decision is rendered on screen. Every function call, data transformation, and gate check is documented in sequence.
 
 ---
 
-## Step 1 — View Mount
+## The Single Execution Path
 
-**File:** `frontend/src/App.jsx`
-
-User clicks "Decision Draft" in the `StaggeredMenu`. `onItemClick` fires with `item.value = 'decision-draft'`, calling `setActiveView('decision-draft')`. `renderView()` evaluates the switch and mounts `<LegalDecisionDocument />` inside `<ErrorBoundary>`.
-
-For the standalone Decision module, the user navigates to `activeView = 'decision'`, which mounts `<DecisionPage />` inside `<ErrorBoundary>`.
+There is exactly one valid path through the system. Any deviation from this path is either a bug or a security event. The path is:
 
 ```
-StaggeredMenu.onItemClick('decision')
-  → setActiveView('decision')
-  → renderView() → case 'decision'
-  → <ErrorBoundary><DecisionPage /></ErrorBoundary>
-```
-
----
-
-## Step 2 — Query Submission
-
-**File:** `frontend/src/components/DecisionPage.jsx`
-
-User types the query and clicks "Get Legal Decision". `handleSubmitQuery(e)` fires:
-
-```js
-e.preventDefault()
-setLoading(true)
-setError(null)
-setDecision(null)
-
-const result = await queryNyayaDecision(query.trim())
+React UI
+  → nyayaApiClient (axios interceptor)
+    → POST /nyaya/query
+      → AuditLogMiddleware
+        → add_trace_id_middleware
+          → request_validation_middleware
+            → router.query_legal()
+              → JurisdictionRouterAgent.process()
+                → LegalAgent.process()
+                  → ObserverPipeline.process_result()
+                    → ResponseBuilder.build_nyaya_response()
+                      → validate_decision_contract()
+                        → NyayaResponse { metadata.Formatted: true }
+              ← HTTP 200 JSON
+          ← AuditLogMiddleware writes audit record
+        ← axios response interceptor validates Formatted + schema
+      ← React component receives validated DecisionContract
+    ← UI renders GravitasDecisionPanel / EnforcementGatekeeper
 ```
 
 ---
 
-## Step 3 — API Call
+## Step-by-Step Trace
 
-**File:** `frontend/src/services/nyayaBackendApi.js` → `queryNyayaDecision()`
+### Step 1 — User Submits Query (React UI)
 
-```js
-const response = await nyayaClient.post('/nyaya/query', {
-  query: query.trim(),
-  jurisdiction_hint: 'IN'
+**File:** `src/components/LegalQueryCard.jsx` or `LegalDecisionDocument.jsx`
+
+The user fills in a legal query and selects a jurisdiction. On submit, the component calls `legalQueryService.submitQuery()`:
+
+```javascript
+// src/services/nyayaApi.js
+const payload = {
+    query: "What are my rights if my employer withholds salary?",
+    jurisdiction_hint: "India",
+    user_context: { role: "citizen", confidence_required: true }
+}
+const response = await apiClient.post('/nyaya/query', payload)
+```
+
+Before the request leaves the browser, the axios request interceptor fires:
+
+```javascript
+// src/lib/nyayaApiClient.js — request interceptor
+config.headers['X-Pipeline-Entry'] = 'black-box-execution'
+config.headers['X-No-Bypass'] = 'true'
+config.headers['X-Trace-ID'] = window.__gravitas_active_trace_id  // if set
+```
+
+These headers signal to the backend that the request originated from the unified pipeline entry point.
+
+---
+
+### Step 2 — Request Arrives at FastAPI (Middleware Stack)
+
+**File:** `nyaya/backend/main.py`
+
+FastAPI processes middleware in reverse registration order. The effective order for an incoming request is:
+
+```
+1. AuditLogMiddleware.dispatch()     — starts timer, will write audit log on exit
+2. add_trace_id_middleware()         — generates UUID, sets request.state.trace_id
+3. request_validation_middleware()   — checks Content-Type: application/json
+4. CORSMiddleware                    — validates Origin against ALLOWED_ORIGINS
+```
+
+**CORS check:** If `Origin` header is not in `ALLOWED_ORIGINS` (i.e., not `https://nyai.blackholeinfiverse.com`), the browser receives no `Access-Control-Allow-Origin` header and blocks the request. The FastAPI handler is never reached.
+
+**Content-Type check:** If `Content-Type` is not `application/json`, a 400 is returned immediately with `INVALID_CONTENT_TYPE` error code.
+
+---
+
+### Step 3 — Route Handler Receives Request
+
+**File:** `nyaya/backend/router.py`, `query_legal()`
+
+FastAPI resolves the route and injects dependencies:
+
+```python
+@router.post("/query", response_model=NyayaResponse)
+async def query_legal(
+    request: QueryRequest,          # Pydantic validates body — 422 on failure
+    trace_id: str = Depends(get_trace_id),    # fresh UUID
+    nonce: str = Depends(validate_nonce),     # anti-replay check
+    background_tasks: Optional[BackgroundTasks] = None
+):
+```
+
+`QueryRequest` validation happens here. If `query` is empty, missing, or `jurisdiction_hint` is not one of `India|UK|UAE`, Pydantic raises `ValidationError` → FastAPI returns 422 automatically. The handler body never executes.
+
+---
+
+### Step 4 — Jurisdiction Routing
+
+**File:** `nyaya/observer_pipeline/sovereign_agents/jurisdiction_router_agent.py`
+
+```python
+routing_result = await jurisdiction_router_agent.process({
+    "query": request.query,
+    "jurisdiction_hint": request.jurisdiction_hint,
+    "domain_hint": request.domain_hint
 })
+# Returns: { target_jurisdiction: "IN", target_agent: "india_legal_agent", confidence: 0.5 }
 ```
 
-The Axios request interceptor in `nyayaApi.js` (on `apiClient`) would inject `X-Trace-ID` here if `window.__gravitas_active_trace_id` is set. `nyayaClient` does not have this interceptor — it sends the request without the header on the first call.
+Internally, `JurisdictionRouterAgent._extract_jurisdiction()` reads `jurisdiction_hint` directly (if provided) or falls back to `"IN"`. The `JurisdictionRouter` regex engine (`jurisdiction_router/router.py`) is available for NLP-based routing when no hint is given.
 
-**Network:** `POST https://nyaya-ai-0f02.onrender.com/nyaya/query`
+`emit_event("jurisdiction_resolved", {...})` is called — this builds an event dict but does not yet write to the ledger (OI-02).
 
 ---
 
-## Step 4 — Backend Processing
+### Step 5 — Legal Agent Processing
 
-**File:** `api/main.py` → `add_trace_id_middleware`
+**File:** `nyaya/observer_pipeline/sovereign_agents/legal_agent.py`
 
-A UUID `trace_id` is generated and attached to `request.state`. The request is routed to `api/router.py` → `query_legal()`.
+The router selects the correct agent instance from the pre-initialized dict:
 
-**File:** `api/router.py` → `query_legal()`
-
-```
-1. emit_query_received_event (background task)
-2. JurisdictionRouterAgent.process({ query, jurisdiction_hint, domain_hint })
-   → returns { target_jurisdiction: "IN", target_agent: "india_legal_agent" }
-3. agents["IN"].process({ query, trace_id })
-   → LegalAgent returns { confidence: 0.91, ... }
-4. ResponseBuilder.build_nyaya_response(...)
-5. _trace_store[trace_id] = { confidence, jurisdiction, domain }
-   ← stored for enforcement_status lookup
-6. Return NyayaResponse
+```python
+agents = {
+    "IN":  LegalAgent(agent_id="india_legal_agent",  jurisdiction="India"),
+    "UK":  LegalAgent(agent_id="uk_legal_agent",     jurisdiction="UK"),
+    "UAE": LegalAgent(agent_id="uae_legal_agent",    jurisdiction="UAE")
+}
+agent = agents[target_jurisdiction]
+agent_result = await agent.process({"query": request.query, "trace_id": trace_id})
 ```
 
----
+`LegalAgent.process()` returns:
 
-## Step 5 — Response Receipt
-
-**File:** `frontend/src/services/nyayaBackendApi.js`
-
-```js
-return {
-  success: true,
-  data: response.data,   // NyayaResponse object
-  timestamp: new Date().toISOString()
+```python
+{
+    "query_type": "legal",
+    "jurisdiction": "India",
+    "action": "route_to_sub_agent",
+    "target_agent": "constitutional_agent",
+    "confidence": 0.5   # BaseAgent.generate_confidence_score() — currently hardcoded
 }
 ```
 
-**File:** `frontend/src/components/DecisionPage.jsx`
-
-```js
-if (!result.success) throw new Error(result.error)
-setDecision(result.data)
-console.log('Decision received:', result.data.trace_id)
-```
-
-`window.__gravitas_active_trace_id` is now set via `setActiveTraceId(result.data.trace_id)` if called — subsequent `apiClient` requests will carry `X-Trace-ID`.
+`emit_event("agent_classified", {...})` is called.
 
 ---
 
-## Step 6 — UI Render: Enforcement Banner
+### Step 6 — Observer Pipeline (Vedant's Layer)
 
-`DecisionPage.jsx` evaluates `decision.enforcement_decision`:
+**File:** `nyaya/observer_pipeline/observer_pipeline.py`
 
-```js
-getEnforcementColor('ALLOW')  → '#28a745'
-getEnforcementLabel('ALLOW')  → '✅ ALLOWED'
+This is the critical integration point between Raj's backend and Vedant's pipeline:
+
+```python
+observed_result = await observer_pipeline.process_result(
+    agent_result,       # raw dict from Step 5
+    trace_id,           # UUID from Step 3
+    target_jurisdiction # "India"
+)
 ```
 
-The enforcement banner renders with a left border in the enforcement color. All downstream sections (Legal Analysis, Procedural Steps, Timeline, Evidence, Remedies, Legal Route, Provenance, Confidence) are conditionally rendered only because `decision` is now non-null.
+Inside `ObserverPipeline.process_result()`:
+
+```python
+# 1. Validate and clamp confidence
+confidence = agent_result.get("confidence", 0.5)
+if not isinstance(confidence, (int, float)) or not (0.0 <= confidence <= 1.0):
+    confidence = 0.5  # defensive clamp
+
+# 2. Build observation metadata block
+observed_result = {
+    **agent_result,                    # all original agent fields preserved
+    "observation": {
+        "observation_id":        self.observation_id,
+        "timestamp":             observation_timestamp,
+        "jurisdiction":          jurisdiction,
+        "trace_id":              trace_id,
+        "confidence_validated":  confidence,
+        "pipeline_stage":        "observer_pipeline",
+        "processed_at":          observation_timestamp
+    },
+    "metadata": {
+        "observed": True,
+        "stage": "post_decision_engine"
+    }
+}
+
+# 3. Apply observation rules
+# Rule 1: confidence < 0.3 → append "low_confidence_review_required" flag
+# Rule 2: compute completeness_score from required fields presence
+```
+
+The returned `observed_result` now contains the full `observation` block that will appear in `reasoning_trace.observer_processing` in the final response.
 
 ---
 
-## Step 7 — Parallel Case Presentation Fetch
+### Step 7 — Response Assembly and Formatter Gate
 
-**File:** `frontend/src/App.jsx` → `CasePresentation` component
+**File:** `nyaya/backend/response_builder.py`, `build_nyaya_response()`
 
-If `CasePresentation` is mounted (e.g., from `LegalQueryCard` flow), it fires `fetchCaseData()` on mount:
+```python
+# Extract validated confidence from observer output
+confidence = observed_result.get("observation", {}).get("confidence_validated", 0.5)
 
-```js
-const [caseResult, enforcementResult] = await Promise.all([
-  casePresentationService.getAllCaseData(traceId, currentJurisdiction, caseType, caseId),
-  casePresentationService.getEnforcementStatus(traceId, currentJurisdiction)
-])
+# Build reasoning trace — this is what the frontend receives in reasoning_trace
+reasoning_trace = {
+    "routing_decision":    routing_result,       # Step 4 output
+    "agent_processing":    agent_result,         # Step 5 output
+    "observer_processing": observed_result.get("observation", {})  # Step 6 output
+}
+
+# Store confidence for enforcement status lookup
+_trace_store[trace_id] = {
+    "confidence": confidence,
+    "jurisdiction": target_jurisdiction,
+    "domain": domain
+}
+
+# Assemble NyayaResponse
+response = NyayaResponse(
+    domain=domain,
+    jurisdiction=target_jurisdiction,
+    confidence=confidence,
+    legal_route=[jurisdiction_router_agent.agent_id, agent.agent_id],
+    trace_id=trace_id,
+    enforcement_status=EnforcementStatus(state="clear", verdict="ENFORCEABLE", trace_id=trace_id),
+    reasoning_trace=reasoning_trace,
+    metadata={"Formatted": True}   # ← FORMATTER GATE SENTINEL
+)
+
+# Backend-side schema validation — raises ValueError on failure
+validate_decision_contract(response.dict())
 ```
 
-`getAllCaseData()` internally fires five parallel requests:
-
-```
-Promise.all([
-  GET /nyaya/case_summary?trace_id=...&jurisdiction=India
-  GET /nyaya/legal_routes?trace_id=...&jurisdiction=India&case_type=...
-  GET /nyaya/timeline?trace_id=...&jurisdiction=India&case_id=...
-  GET /nyaya/glossary?trace_id=...&jurisdiction=India&case_type=...
-  GET /nyaya/jurisdiction_info?jurisdiction=India
-])
-```
-
-All five carry `X-Trace-ID` via the request interceptor.
+If `validate_decision_contract()` raises, the `except Exception` block in `query_legal()` catches it and returns a structured 500. The `NyayaResponse` object is never serialized to JSON.
 
 ---
 
-## Step 8 — Schema Validation
+### Step 8 — Audit Log Written
 
-**File:** `frontend/src/services/nyayaApi.js`
+**File:** `nyaya/backend/audit_logger.py`
 
-Each response passes through a strict validator before being stored in state:
+As the response exits the middleware stack, `AuditLogMiddleware` reads the response body and writes:
 
-| Validator | Required Fields |
-|---|---|
-| `_validateCaseSummary()` | `title`, `overview`, `jurisdiction`, `confidence`, `summaryAnalysis` |
-| `_validateLegalRoutes()` | `routes[]` (non-empty), `jurisdiction` |
-| `_validateTimeline()` | `events[]` (non-empty), `jurisdiction`, valid `type` and `status` enums |
-| `_validateGlossary()` | `terms[]` (non-empty), `jurisdiction` |
-| `_validateEnforcementStatus()` | `state` ∈ valid enum, `verdict` ∈ valid enum |
+```json
+{
+  "ts": "2025-07-14T10:23:41.123Z",
+  "trace_id": "a1b2c3d4-e5f6-...",
+  "method": "POST",
+  "path": "/nyaya/query",
+  "status": 200,
+  "duration_ms": 312.4,
+  "origin": "https://nyai.blackholeinfiverse.com",
+  "formatted": true,
+  "observer_triggered": true,
+  "schema_valid": true
+}
+```
 
-Any validator that throws causes the service method to return `{ success: false, error: "..." }`. The `CasePresentation` component renders an error banner with a retry counter — no partial data reaches the card components.
-
-**File:** `frontend/src/lib/casePayloadValidator.js`
-
-For the document view flow, `validateCasePayload(payload, strict)` validates all 9 fields of the formatter contract. The Zod schema (`casePayloadZodSchema`) provides a secondary layer when Zod is available.
+`formatted=false` or `schema_valid=false` in any audit record is a pipeline integrity alert.
 
 ---
 
-## Step 9 — Component Render
+### Step 9 — Frontend Response Interceptor (Second Gate)
 
-**File:** `frontend/src/App.jsx` → `CasePresentation`
+**File:** `src/lib/nyayaApiClient.js`
 
-Validated data is spread into card components:
+The axios response interceptor fires before the `.then()` callback in any service function:
 
-```jsx
-<EnforcementStatusCard enforcementStatus={caseData.enforcementStatus} traceId={traceId} />
-<JurisdictionInfoBar jurisdiction={caseData.jurisdictionInfo} />
-<CaseSummaryCard {...caseData.caseSummary} traceId={traceId} />
-<LegalRouteCard {...caseData.legalRoutes} traceId={traceId} />
-<TimelineCard {...caseData.timeline} traceId={traceId} />
-<GlossaryCard {...caseData.glossary} traceId={traceId} />
+```javascript
+// Gate check 1: Formatted flag
+if (!response.data?.metadata?.Formatted) {
+    console.error('Security Alert: Response did not pass through Formatter.')
+    throw new Error('UNFORMATTED_RESPONSE: Response rejected due to missing Formatted metadata tag')
+}
+
+// Gate check 2: DecisionContract schema
+try {
+    validateDecisionContract(response.data)
+    console.log('✅ DecisionContract: Schema validation passed')
+} catch (validationError) {
+    throw new Error(`INVALID_CONTRACT: ${validationError.message}`)
+}
+
+// Gate check 3: Clear any previous service outage
+if (_isServiceOutage) clearServiceOutage()
 ```
 
-`EnforcementStatusCard` renders nothing if `state === 'clear'`. For all other states (`block`, `escalate`, `soft_redirect`, `conditional`), it renders a color-coded card with `safe_explanation`, `reason`, `blocked_path`, `escalation_target`, and `redirect_suggestion` as applicable.
+If either gate throws, the error propagates to the calling service function's `catch` block, which returns `{ success: false, error: "..." }` to the component.
 
 ---
 
-## Step 10 — Error Path (Backend Down)
+### Step 10 — UI Rendering Decision
 
-If any request in Steps 3–7 fails with a network error or 5xx:
+**File:** `src/App.jsx`, component tree
+
+The component receives the validated response and follows this rendering decision tree:
 
 ```
-Axios response interceptor
-  → _emitFailure(errorDetails)     → useResiliency → isOffline = true
-  → _emitOutage(errorDetails)      → ServiceOutage listeners notified
-  → offlineStore.save(snapshot)    → localStorage['gravitas_case_intake']
-  → offlineStore.markPendingSync() → localStorage['gravitas_pending_sync']
-  → OfflineBanner renders globally
-  → setInterval(probeHealth, 15000) starts
-```
+response.success === false?
+  └─ ApiErrorState renders (title, message, traceId, onRetry)
 
-`apiService.js` additionally fires `toast.error("Backend waking up... please wait.")` for any 5xx or fetch failure.
+response.success === true?
+  └─ setLastResponse(response.data)
+  └─ Component renders based on enforcement_status.state:
+       "clear"        → GravitasDecisionPanel / full decision view
+       "conditional"  → Decision view + caution overlay
+       "escalate"     → EscalationNotice component
+       "block"        → ComplianceBarrier / EnforcementGatekeeper (decision hidden)
+       "soft_redirect"→ RedirectModal with alternative pathway suggestion
+
+Unhandled exception in any component?
+  └─ ErrorBoundary.componentDidCatch() fires
+  └─ SystemCrash overlay renders (trace_id, "Return to Dashboard", "Try Again")
+```
 
 ---
 
-## Step 11 — Feedback / RL Signal
+## Enforcement Status — Separate Fetch
 
-After the decision renders, the user can submit feedback via `FeedbackButtons`:
+The enforcement status is fetched as a **separate GET request** after the query completes. This is intentional — it allows the enforcement gate to be checked independently of the query result:
 
-```
-legalQueryService.submitFeedback({ trace_id, rating, feedback_type, comment })
-  → POST /nyaya/feedback
-  → FeedbackAPI.receive_feedback() in rl_engine/feedback_api.py
-  → background task: _emit_feedback_received_event()
-
-legalQueryService.sendRLSignal({ trace_id, helpful, clear, match })
-  → POST /nyaya/rl_signal
-  → background task: _emit_rl_signal_received_event()
+```javascript
+// src/services/nyayaApi.js — casePresentationService
+const result = await apiClient.get('/nyaya/enforcement_status', {
+    params: { trace_id: traceId, jurisdiction }
+})
 ```
 
-`sendRLSignal()` validates that `trace_id` is a non-empty string and all three signal fields are booleans before making the request — invalid inputs return `{ success: false }` without hitting the network.
+The backend reads `_trace_store[trace_id]["confidence"]` (populated in Step 7) and computes the enforcement state. If the trace is not found (e.g., after a server restart), it returns 404, and the frontend fallback returns `NON_ENFORCEABLE` — the decision is blocked until enforcement can be verified.
 
 ---
 
-## Step 12 — Export
+## Failure Path Walkthrough
 
-User clicks "Export Decision" in `DecisionPage.jsx`:
+### Scenario: Backend returns 503
 
-```js
-const dataBlob = new Blob([JSON.stringify(decision, null, 2)], { type: 'application/json' })
-const url = URL.createObjectURL(dataBlob)
-const link = document.createElement('a')
-link.href = url
-link.download = `decision-${decision.trace_id}.json`
-link.click()
+```
+Step 9 axios interceptor: status=503 → isServerError=true
+  → _emitFailure(errorDetails)
+  → _emitOutage(errorDetails)
+  → useResiliency.onBackendFailure fires
+  → offlineStore.save(caseIntakeRef.current)
+  → setIsOffline(true)
+  → OfflineBanner renders: "Service unavailable. Your data has been saved."
+  → pollRef starts: GET /health every 15 seconds
+  → On recovery: clearServiceOutage() → OfflineBanner dismisses
+  → syncToServer() replays saved intake
 ```
 
-The full `NyayaResponse` object is exported as a JSON file named with the `trace_id`.
+### Scenario: Response missing metadata.Formatted
+
+```
+Step 9 axios interceptor: metadata.Formatted is undefined
+  → throws Error('UNFORMATTED_RESPONSE: ...')
+  → legalQueryService.submitQuery() catch block:
+      return { success: false, error: 'UNFORMATTED_RESPONSE: ...' }
+  → Component renders ApiErrorState:
+      title: "Data Unavailable"
+      message: "UNFORMATTED_RESPONSE: ..."
+      traceId: <from response or window.__gravitas_active_trace_id>
+  → AuditLog records: formatted=false, schema_valid=false
+```
+
+### Scenario: Agent crashes mid-execution
+
+```
+LegalAgent.process() throws RuntimeError("agent exploded")
+  → router.query_legal() except block catches it
+  → Returns HTTP 500:
+      { error_code: "INTERNAL_ERROR", message: "An internal error occurred", trace_id: "..." }
+  → No Python traceback in response body
+  → axios interceptor: status=500 → isServerError=true → ServiceOutage triggered
+  → AuditLog records: status=500, formatted=false
+```
 
 ---
 
-## Execution Summary
+## Data Shape at Each Stage
 
 ```
-User Input
-  └─ DecisionPage.handleSubmitQuery()
-       └─ nyayaBackendApi.queryNyayaDecision()
-            └─ POST /nyaya/query
-                 └─ FastAPI: add_trace_id_middleware → query_legal()
-                      └─ JurisdictionRouterAgent → LegalAgent["IN"]
-                           └─ NyayaResponse { trace_id, enforcement_decision, confidence, ... }
-                                └─ DecisionPage.setDecision()
-                                     └─ UI renders enforcement banner + all decision sections
-                                          └─ CasePresentation (parallel)
-                                               └─ Promise.all(5 GET endpoints)
-                                                    └─ Validators → Card components
+Stage 1 — Query Payload (Frontend → Backend)
+{
+  query: "...",
+  jurisdiction_hint: "India",
+  user_context: { role: "citizen", confidence_required: true }
+}
+
+Stage 2 — Agent Result (LegalAgent → ObserverPipeline)
+{
+  query_type: "legal",
+  jurisdiction: "India",
+  action: "route_to_sub_agent",
+  target_agent: "constitutional_agent",
+  confidence: 0.5
+}
+
+Stage 3 — Observed Result (ObserverPipeline → ResponseBuilder)
+{
+  ...agent_result,
+  observation: {
+    observation_id: "uuid",
+    timestamp: "2025-...",
+    jurisdiction: "India",
+    trace_id: "uuid",
+    confidence_validated: 0.5,
+    pipeline_stage: "observer_pipeline",
+    completeness_score: 0.67,
+    flags: []
+  },
+  metadata: { observed: true, stage: "post_decision_engine" }
+}
+
+Stage 4 — NyayaResponse (Backend → Frontend wire format)
+{
+  trace_id: "uuid",
+  jurisdiction: "India",
+  domain: "general",
+  legal_route: ["jurisdiction_router_agent_id", "india_legal_agent"],
+  confidence: 0.5,
+  enforcement_status: { state: "escalate", verdict: "PENDING_REVIEW", ... },
+  reasoning_trace: {
+    routing_decision: { ... },
+    agent_processing: { ... },
+    observer_processing: { observation_id: "...", pipeline_stage: "observer_pipeline", ... }
+  },
+  constitutional_articles: [],
+  provenance_chain: [],
+  metadata: { Formatted: true }
+}
+
+Stage 5 — Validated Contract (Frontend component receives)
+Same as Stage 4 — schema validated, Formatted confirmed, safe to render
 ```
