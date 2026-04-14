@@ -7,6 +7,8 @@
     "dev": "vite",
     "build": "node node_modules/vite/bin/vite.js build",
     "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "storybook": "storybook dev -p 6006",
     "build-storybook": "storybook build"
   },
@@ -24,9 +26,12 @@
     "@storybook/addon-onboarding": "^10.1.11",
     "@storybook/react-vite": "^10.1.11",
     "@vitejs/plugin-react": "^4.0.0",
+    "@vitest/coverage-v8": "^2.0.0",
+    "jsdom": "^24.0.0",
     "prop-types": "^15.8.1",
     "storybook": "^10.1.11",
-    "vite": "^7.3.1"
+    "vite": "^7.3.1",
+    "vitest": "^2.0.0"
   },
   "engines": {
     "node": "24.x",

@@ -63,31 +63,6 @@ const CasePresentation = ({ decision }) => {
       </div>
     </div>
   )
-        // Real error from backend - no fallback to sample data
-        setError(caseResult.error || 'Failed to load case data from Nyaya backend')
-        setCaseData({
-          caseSummary: null,
-          legalRoutes: null,
-          timeline: null,
-          glossary: null,
-          jurisdictionInfo: null,
-          enforcementStatus: enforcementStatus
-        })
-      }
-    } catch (err) {
-      setError(err.message || 'Failed to connect to Nyaya backend')
-      setCaseData({
-        caseSummary: null,
-        legalRoutes: null,
-        timeline: null,
-        glossary: null,
-        jurisdictionInfo: null,
-        enforcementStatus: null
-      })
-    } finally {
-      setLoading(false)
-    }
-  }, [traceId, currentJurisdiction, caseType, caseId, retryCount])
 
   // Fetch data on mount and when jurisdiction changes
   useEffect(() => {

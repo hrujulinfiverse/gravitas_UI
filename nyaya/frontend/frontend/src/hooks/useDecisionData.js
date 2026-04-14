@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react'
-import { validateDecisionContract, DecisionContractSchema } from '../../../packages/shared/decision_contract'
+import { validateDecisionContract, DecisionContractSchema } from '../../../packages/shared/decision_contract.ts'
 
 /**
  * Custom hook for managing validated DecisionContract data
