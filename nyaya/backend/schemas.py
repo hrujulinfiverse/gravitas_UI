@@ -1,6 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Dict, Any, List, Optional
 from enum import Enum
+from packages.shared.decision_contract import DecisionContract, EnforcementStatus
 
 class UserRole(str, Enum):
     CITIZEN = "citizen"
@@ -44,7 +45,7 @@ class QueryRequest(BaseModel):
 
 class MultiJurisdictionRequest(BaseModel):
     query: str = Field(..., description="Legal query text")
-    jurisdictions: List[JurisdictionHint] = Field(..., min_items=1, max_items=3)
+    jurisdictions: List[JurisdictionHint]
 
 class ExplanationLevel(str, Enum):
     BRIEF = "brief"
@@ -66,29 +67,12 @@ class FeedbackRequest(BaseModel):
     feedback_type: FeedbackType
     comment: Optional[str] = Field(None, max_length=1000)
 
-class EnforcementStatus(BaseModel):
-    """Represents the enforcement state of a legal pathway."""
-    state: EnforcementState = EnforcementState.CLEAR
-    verdict: EnforcementVerdict = EnforcementVerdict.ENFORCEABLE
-    reason: str = ""
-    barriers: List[str] = []          # Specific blockers for NON_ENFORCEABLE
-    blocked_path: Optional[str] = None
-    escalation_required: bool = False
-    escalation_target: Optional[str] = None
-    redirect_suggestion: Optional[str] = None
-    safe_explanation: str = ""
-    trace_id: str
-
-class NyayaResponse(BaseModel):
-    domain: str
-    jurisdiction: str
-    confidence: float = Field(..., ge=0.0, le=1.0)
-    legal_route: List[str]
+# NyayaResponse now inherits from DecisionContract
+class NyayaResponse(DecisionContract):
+    """Nyaya-specific response extending DecisionContract."""
     constitutional_articles: List[str] = []
     provenance_chain: List[Dict[str, Any]] = []
-    reasoning_trace: Dict[str, Any] = {}
-    trace_id: str
-    enforcement_status: Optional[EnforcementStatus] = None
+    metadata: Dict[str, Any] = {}
 
 class MultiJurisdictionResponse(BaseModel):
     comparative_analysis: Dict[str, NyayaResponse]

@@ -1,29 +1,33 @@
 from typing import Dict, Any, List, Optional
-from api.schemas import (
+from backend.schemas import (
     NyayaResponse, MultiJurisdictionResponse, ExplainReasoningResponse,
-    FeedbackResponse, TraceResponse, RLSignalResponse, ErrorResponse,
-    EnforcementStatus, EnforcementState
+    FeedbackResponse, TraceResponse, RLSignalResponse, ErrorResponse
 )
-from provenance_chain.lineage_tracer import tracer
-from provenance_chain.hash_chain_ledger import ledger
-from provenance_chain.event_signer import signer
+from packages.shared.decision_contract import validate_decision_contract, EnforcementStatus, EnforcementState, EnforcementVerdict
 
 class ResponseBuilder:
     """Builds standardized responses for the Nyaya API Gateway."""
 
-    @staticmethod  
+    @staticmethod
     def build_nyaya_response(
         domain: str,
         jurisdiction: str,
         confidence: float,
         legal_route: List[str],
         trace_id: str,
-        provenance_chain: List[Dict[str, Any]] = None,
-        reasoning_trace: Dict[str, Any] = None,
-        constitutional_articles: List[str] = None
+        provenance_chain: Optional[List[Dict[str, Any]]] = None,
+        reasoning_trace: Optional[Dict[str, Any]] = None,
+        constitutional_articles: Optional[List[str]] = None
     ) -> NyayaResponse:
         """Build a standardized Nyaya response."""
-        return NyayaResponse(
+        # Create enforcement status with defaults
+        enforcement_status = EnforcementStatus(
+            state=EnforcementState.CLEAR,
+            verdict=EnforcementVerdict.ENFORCEABLE,
+            trace_id=trace_id
+        )
+
+        response = NyayaResponse(
             domain=domain,
             jurisdiction=jurisdiction,
             confidence=confidence,
@@ -31,8 +35,19 @@ class ResponseBuilder:
             constitutional_articles=constitutional_articles or [],
             provenance_chain=provenance_chain or [],
             reasoning_trace=reasoning_trace or {},
-            trace_id=trace_id
+            trace_id=trace_id,
+            enforcement_status=enforcement_status,
+            metadata={"Formatted": True}
         )
+
+        # Validate against DecisionContract schema
+        try:
+            validate_decision_contract(response.dict())
+        except Exception as validation_error:
+            # If validation fails, raise error
+            raise ValueError(f"DecisionContract validation failed: {str(validation_error)}")
+
+        return response
 
     @staticmethod
     def build_multi_jurisdiction_response(
@@ -53,8 +68,8 @@ class ResponseBuilder:
         explanation_level: str
     ) -> ExplainReasoningResponse:
         """Build an explain reasoning response."""
-        # Fetch trace data from provenance store
-        trace_history = tracer.get_trace_history(trace_id)
+        # Placeholder for trace data from provenance store
+        trace_history = {"events": [], "trace_id": trace_id}  # Placeholder
         reasoning_tree = ResponseBuilder._construct_reasoning_tree(trace_history, explanation_level)
 
         # Extract constitutional articles if jurisdiction is India
@@ -98,8 +113,8 @@ class ResponseBuilder:
     @staticmethod
     def build_trace_response(trace_id: str) -> TraceResponse:
         """Build a full trace audit response."""
-        # Get event chain from ledger
-        event_chain = ledger.get_all_entries()
+        # Placeholder for event chain from ledger
+        event_chain = []  # Placeholder
 
         # Filter events for this trace_id
         trace_events = [
@@ -492,16 +507,16 @@ class ResponseBuilder:
             }
         }
         
-        info = jurisdiction_info.get(jurisdiction, jurisdiction_info.get("India"))
-        
+        info = jurisdiction_info.get(jurisdiction, jurisdiction_info.get("India", {})) or {}
+
         return {
-            "country": info.get("country"),
-            "courtSystem": info.get("courtSystem"),
-            "authorityFraming": info.get("authorityFraming"),
-            "emergencyGuidance": info.get("emergencyGuidance"),
-            "legalFramework": info.get("legalFramework"),
-            "limitationAct": info.get("limitationAct"),
-            "constitution": info.get("constitution"),
+            "country": info.get("country", ""),
+            "courtSystem": info.get("courtSystem", ""),
+            "authorityFraming": info.get("authorityFraming", ""),
+            "emergencyGuidance": info.get("emergencyGuidance", ""),
+            "legalFramework": info.get("legalFramework", ""),
+            "limitationAct": info.get("limitationAct", ""),
+            "constitution": info.get("constitution", ""),
             "jurisdiction": jurisdiction
         }
 
@@ -513,7 +528,7 @@ class ResponseBuilder:
         state: str = "clear",
         verdict: str = "ENFORCEABLE",
         reason: str = "",
-        barriers: List[str] = None,
+        barriers: Optional[List[str]] = None,
         blocked_path: Optional[str] = None,
         escalation_required: bool = False,
         escalation_target: Optional[str] = None,

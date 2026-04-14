@@ -28,55 +28,41 @@ import OfflineBanner from './components/OfflineBanner.jsx'
 import { casePresentationService } from './services/nyayaApi.js'
 import { useResiliency } from './hooks/useResiliency.js'
 
-// Case Presentation Component - Wires components to real backend data only
-// NO MOCK DATA - All data comes from real Nyaya backend (Raj's Decision Engine)
-const CasePresentation = ({ traceId, jurisdiction, caseType, caseId }) => {
-  const [caseData, setCaseData] = useState({
-    caseSummary: null,
-    legalRoutes: null,
-    timeline: null,
-    glossary: null,
-    jurisdictionInfo: null,
-    enforcementStatus: null
-  })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [currentJurisdiction, setCurrentJurisdiction] = useState(jurisdiction || 'India')
-  const [retryCount, setRetryCount] = useState(0)
+// Case Presentation Component - Consumes unified DecisionContract data
+const CasePresentation = ({ decision }) => {
+  if (!decision) {
+    return <div>No decision data available</div>
+  }
 
-  // Fetch all case data from REAL backend only - no fallback to mock data
-  const fetchCaseData = useCallback(async () => {
-    // Cannot fetch without traceId - show error instead of mock data
-    if (!traceId) {
-      setError('No trace ID available. Please submit a legal query first to get a decision from Nyaya backend.')
-      setLoading(false)
-      return
-    }
-
-    setLoading(true)
-    setError(null)
-
-    try {
-      // Fetch case data and enforcement status in parallel from REAL backend
-      const [caseResult, enforcementResult] = await Promise.all([
-        casePresentationService.getAllCaseData(traceId, currentJurisdiction, caseType, caseId),
-        casePresentationService.getEnforcementStatus(traceId, currentJurisdiction)
-      ])
-
-      // Get enforcement status data from Chandresh's Sovereign Enforcement Engine
-      const enforcementStatus = enforcementResult.success ? enforcementResult.data : null
-
-      if (caseResult.success) {
-        // Use real backend data only - no fallback
-        setCaseData({
-          caseSummary: caseResult.data.caseSummary,
-          legalRoutes: caseResult.data.legalRoutes,
-          timeline: caseResult.data.timeline,
-          glossary: caseResult.data.glossary,
-          jurisdictionInfo: caseResult.data.jurisdictionInfo,
-          enforcementStatus: enforcementStatus
-        })
-      } else {
+  return (
+    <div style={{ padding: '20px', border: '1px solid #ccc', margin: '20px' }}>
+      <h2>Case Presentation - DecisionContract Consumer</h2>
+      <div>
+        <strong>Trace ID:</strong> {decision.trace_id}
+      </div>
+      <div>
+        <strong>Jurisdiction:</strong> {decision.jurisdiction}
+      </div>
+      <div>
+        <strong>Domain:</strong> {decision.domain}
+      </div>
+      <div>
+        <strong>Confidence:</strong> {Math.round(decision.confidence * 100)}%
+      </div>
+      <div>
+        <strong>Legal Route:</strong> {decision.legal_route.join(' → ')}
+      </div>
+      <div>
+        <strong>Enforcement Status:</strong> {decision.enforcement_status.verdict}
+      </div>
+      <div>
+        <strong>Reasoning Trace:</strong>
+        <pre style={{ fontSize: '0.8rem', maxHeight: '200px', overflow: 'auto' }}>
+          {JSON.stringify(decision.reasoning_trace, null, 2)}
+        </pre>
+      </div>
+    </div>
+  )
         // Real error from backend - no fallback to sample data
         setError(caseResult.error || 'Failed to load case data from Nyaya backend')
         setCaseData({

@@ -5,27 +5,7 @@
  * Handles real legal decision queries and responses
  */
 
-import axios from 'axios'
-
-const NYAYA_API_BASE = 'https://nyaya-ai-0f02.onrender.com'
-
-// Create axios instance for Nyaya API
-const nyayaClient = axios.create({
-  baseURL: NYAYA_API_BASE,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
-})
-
-// Response interceptor for error handling
-nyayaClient.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    console.error('Nyaya API Error:', error.response?.data || error.message)
-    return Promise.reject(error)
-  }
-)
+import nyayaApiClient from '../lib/nyayaApiClient'
 
 /**
  * Query Nyaya AI for legal decision
@@ -39,12 +19,17 @@ export async function queryNyayaDecision(query, jurisdiction = 'IN') {
       throw new Error('Query cannot be empty')
     }
 
-    const response = await nyayaClient.post('/nyaya/query', {
+    const response = await nyayaApiClient.post('/nyaya/query', {
       query: query.trim(),
       jurisdiction_hint: jurisdiction
     })
 
-    // Validate response has enforcement_decision
+    // Validate response has Formatted metadata tag
+    if (!response.data?.metadata?.Formatted) {
+      throw new Error('Response rejected: Missing "Formatted" metadata tag. Raw data leaks are not permitted.')
+    }
+
+    // Validate response has enforcement_decision (legacy check)
     if (!response.data?.enforcement_decision) {
       console.warn('Warning: Response missing enforcement_decision field')
     }
@@ -88,7 +73,7 @@ export async function queryNyayaDecision(query, jurisdiction = 'IN') {
  */
 export async function testNyayaConnection() {
   try {
-    const response = await nyayaClient.get('/health', { timeout: 5000 })
+    const response = await nyayaApiClient.get('/health', { timeout: 5000 })
     return {
       success: true,
       status: response.status,

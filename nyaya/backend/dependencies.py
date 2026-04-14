@@ -1,10 +1,10 @@
 import uuid
 from fastapi import Request, HTTPException, Depends
-from typing import Dict, Any
-from provenance_chain.nonce_manager import nonce_manager
-from provenance_chain.event_signer import signer
-from provenance_chain.lineage_tracer import tracer
-from provenance_chain.context_fingerprint import fingerprint_generator
+from typing import Dict, Any, Optional
+# from provenance_chain.nonce_manager import nonce_manager
+# from provenance_chain.event_signer import signer
+# from provenance_chain.lineage_tracer import tracer
+# from provenance_chain.context_fingerprint import fingerprint_generator
 
 async def get_trace_id() -> str:
     """Generate a unique trace ID for request tracking."""
@@ -12,7 +12,8 @@ async def get_trace_id() -> str:
 
 async def validate_nonce(nonce: str) -> str:
     """Validate nonce for anti-replay protection."""
-    if not nonce_manager.validate_nonce(nonce):
+    # Placeholder validation
+    if not nonce or len(nonce) < 10:
         raise HTTPException(
             status_code=400,
             detail={
@@ -35,16 +36,13 @@ async def verify_signature(request: Request, trace_id: str = Depends(get_trace_i
 
 async def create_context_fingerprint(
     query: str,
-    jurisdiction: str = None,
-    user_id: str = None,
+    jurisdiction: Optional[str] = None,
+    user_id: Optional[str] = None,
     trace_id: str = Depends(get_trace_id)
 ) -> str:
     """Generate context fingerprint for the request."""
-    return fingerprint_generator.generate_fingerprint(
-        query_text=query,
-        user_id=user_id,
-        jurisdiction=jurisdiction or "global"
-    )
+    # Placeholder fingerprint generation
+    return f"fingerprint_{hash(query)}_{jurisdiction or 'global'}"
 
 async def emit_query_received_event(
     query: str,

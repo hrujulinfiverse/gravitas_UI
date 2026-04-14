@@ -1,6 +1,8 @@
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from api.router import router
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+from backend.router import router
 import uvicorn
 import os
 
@@ -25,16 +27,26 @@ app.add_middleware(
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    from api.response_builder import ResponseBuilder
+    from backend.error_handler import ErrorHandler
+    from pydantic import ValidationError
+    from packages.shared.decision_contract import ValidationError as ContractValidationError
+
     trace_id = getattr(request.state, 'trace_id', 'unknown')
-    return HTTPException(
-        status_code=500,
-        detail=ResponseBuilder.build_error_response(
-            "INTERNAL_ERROR",
-            "An unexpected error occurred",
-            trace_id
-        ).dict()
-    )
+
+    # Handle specific exception types
+    if isinstance(exc, ValidationError):
+        return ErrorHandler.handle_validation_error(exc, trace_id)
+    elif isinstance(exc, ContractValidationError):
+        return ErrorHandler.handle_contract_error(exc, trace_id)
+    elif isinstance(exc, HTTPException):
+        return ErrorHandler.create_error_response(
+            "HTTP_EXCEPTION",
+            exc.detail,
+            trace_id,
+            exc.status_code
+        )
+    else:
+        return ErrorHandler.handle_internal_error(exc, trace_id)
 
 # Middleware to add trace_id to request state
 @app.middleware("http")
@@ -44,6 +56,31 @@ async def add_trace_id_middleware(request: Request, call_next):
     request.state.trace_id = trace_id
     response = await call_next(request)
     return response
+
+# Request validation middleware
+@app.middleware("http")
+async def request_validation_middleware(request: Request, call_next):
+    # Basic validation for malformed requests
+    if request.method in ["POST", "PUT", "PATCH"]:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" not in content_type.lower():
+            from fastapi.responses import JSONResponse
+            from backend.response_builder import ResponseBuilder
+            trace_id = getattr(request.state, 'trace_id', 'unknown')
+            error_response = ResponseBuilder.build_error_response(
+                "INVALID_CONTENT_TYPE",
+                "Content-Type must be application/json",
+                trace_id
+            )
+            return JSONResponse(
+                status_code=400,
+                content=error_response.dict()
+            )
+
+    response = await call_next(request)
+    return response
+
+
 
 # Include routers
 app.include_router(router)

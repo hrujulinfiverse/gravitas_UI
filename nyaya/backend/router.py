@@ -1,22 +1,24 @@
 from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, Query
 from typing import Dict, Any, List, Optional
 import asyncio
-from api.schemas import (
+from fastapi import BackgroundTasks as FastAPIBackgroundTasks
+from backend.schemas import (
     QueryRequest, MultiJurisdictionRequest, ExplainReasoningRequest,
     FeedbackRequest, RLSignalRequest, NyayaResponse, MultiJurisdictionResponse,
     ExplainReasoningResponse, FeedbackResponse, RLSignalResponse, TraceResponse,
     EnforcementVerdict
 )
-from api.dependencies import get_trace_id, validate_nonce, emit_query_received_event
-from api.response_builder import ResponseBuilder
-from sovereign_agents.jurisdiction_router_agent import JurisdictionRouterAgent
-from sovereign_agents.legal_agent import LegalAgent
-from sovereign_agents.constitutional_agent import ConstitutionalAgent
-from jurisdiction_router.router import JurisdictionRouter
-from rl_engine.feedback_api import FeedbackAPI
-from provenance_chain.lineage_tracer import tracer
-from provenance_chain.hash_chain_ledger import ledger
-from provenance_chain.event_signer import signer
+from backend.dependencies import get_trace_id, validate_nonce, emit_query_received_event
+from backend.response_builder import ResponseBuilder
+from observer_pipeline.sovereign_agents.jurisdiction_router_agent import JurisdictionRouterAgent
+from observer_pipeline.sovereign_agents.legal_agent import LegalAgent
+from observer_pipeline.sovereign_agents.constitutional_agent import ConstitutionalAgent
+from observer_pipeline.jurisdiction_router.router import JurisdictionRouter
+from observer_pipeline.rl_engine.feedback_api import FeedbackAPI
+from observer_pipeline.observer_pipeline import ObserverPipeline
+# from provenance_chain.lineage_tracer import tracer
+# from provenance_chain.hash_chain_ledger import ledger
+# from provenance_chain.event_signer import signer
 
 router = APIRouter(prefix="/nyaya", tags=["nyaya"])
 
@@ -27,6 +29,7 @@ _trace_store: Dict[str, Dict[str, Any]] = {}
 jurisdiction_router_agent = JurisdictionRouterAgent()
 jurisdiction_router = JurisdictionRouter()
 feedback_api = FeedbackAPI()
+observer_pipeline = ObserverPipeline()
 
 # Agent instances for different jurisdictions
 agents = {
@@ -40,16 +43,17 @@ async def query_legal(
     request: QueryRequest,
     trace_id: str = Depends(get_trace_id),
     nonce: str = Depends(validate_nonce),
-    background_tasks: BackgroundTasks = None
+    background_tasks: Optional[BackgroundTasks] = None
 ):
     """Execute a single-jurisdiction legal query."""
     try:
         # Emit query received event
-        background_tasks.add_task(
-            emit_query_received_event,
-            request.query,
-            trace_id
-        )
+        if background_tasks:
+            background_tasks.add_task(
+                emit_query_received_event,
+                request.query,
+                trace_id
+            )
 
         # Step 1: Call JurisdictionRouterAgent
         routing_result = await jurisdiction_router_agent.process({
@@ -78,8 +82,11 @@ async def query_legal(
             "trace_id": trace_id
         })
 
-        # Step 3: Collect confidence and build response
-        confidence = agent_result.get("confidence", 0.5)
+        # Step 3: Process through Observer Pipeline
+        observed_result = await observer_pipeline.process_result(agent_result, trace_id, target_jurisdiction)
+
+        # Step 4: Collect confidence and build response
+        confidence = observed_result.get("observation", {}).get("confidence_validated", 0.5)
         domain = request.domain_hint or "general"
         legal_route = [jurisdiction_router_agent.agent_id, agent.agent_id]
 
@@ -87,7 +94,8 @@ async def query_legal(
         provenance_chain = []
         reasoning_trace = {
             "routing_decision": routing_result,
-            "agent_processing": agent_result
+            "agent_processing": agent_result,
+            "observer_processing": observed_result.get("observation", {})
         }
 
         # Emit decision explained event
@@ -130,16 +138,17 @@ async def multi_jurisdiction_query(
     request: MultiJurisdictionRequest,
     trace_id: str = Depends(get_trace_id),
     nonce: str = Depends(validate_nonce),
-    background_tasks: BackgroundTasks = None
+    background_tasks: Optional[BackgroundTasks] = None
 ):
     """Execute parallel legal analysis across multiple jurisdictions."""
     try:
         # Emit query received event
-        background_tasks.add_task(
-            emit_query_received_event,
-            request.query,
-            trace_id
-        )
+        if background_tasks:
+            background_tasks.add_task(
+                emit_query_received_event,
+                request.query,
+                trace_id
+            )
 
         comparative_analysis = {}
         confidences = []
@@ -231,7 +240,7 @@ async def submit_feedback(
     request: FeedbackRequest,
     trace_id: str = Depends(get_trace_id),
     nonce: str = Depends(validate_nonce),
-    background_tasks: BackgroundTasks = None
+    background_tasks: Optional[BackgroundTasks] = None
 ):
     """Submit system-level RL feedback."""
     try:
@@ -244,12 +253,13 @@ async def submit_feedback(
         })
 
         # Emit feedback received event
-        background_tasks.add_task(
-            _emit_feedback_received_event,
-            request.trace_id,
-            request.rating,
-            request.feedback_type.value
-        )
+        if background_tasks:
+            background_tasks.add_task(
+                _emit_feedback_received_event,
+                request.trace_id,
+                request.rating,
+                request.feedback_type.value
+            )
 
         return ResponseBuilder.build_feedback_response(
             status="recorded",
@@ -272,7 +282,7 @@ async def send_rl_signal(
     request: RLSignalRequest,
     trace_id: str = Depends(get_trace_id),
     nonce: str = Depends(validate_nonce),
-    background_tasks: BackgroundTasks = None
+    background_tasks: Optional[BackgroundTasks] = None
 ):
     """Send RL training signal."""
     try:
