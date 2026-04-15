@@ -11,3 +11,8 @@ export { default as LegalConsultationCard } from './components/LegalConsultation
 export { default as FeedbackButtons } from './components/FeedbackButtons'
 export { default as LegalQueryCard } from './components/LegalQueryCard'
 export { default as MultiJurisdictionCard } from './components/MultiJurisdictionCard'
+
+// High-Trust Security Components
+export { default as TracePanel } from './components/TracePanel'
+export { default as FormatterGate } from './components/FormatterGate'
+export { default as TraceReplayUI } from './components/TraceReplayUI'
